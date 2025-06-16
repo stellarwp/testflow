@@ -24,6 +24,15 @@ bun add -g testflow
 bun add -D testflow
 ```
 
+### WordPress E2E Test Utils Integration
+
+TestFlow includes **official WordPress E2E test utilities** (`@wordpress/e2e-test-utils-playwright`) providing standardized, well-maintained helpers for WordPress testing:
+
+- **Admin utilities**: Navigate WordPress admin with `admin.visitAdminPage()`
+- **Editor utilities**: Interact with Gutenberg editor via `editor.canvas`
+- **Request utilities**: Fast plugin/theme activation with `requestUtils.activatePlugin()`
+- **Authentication**: Built-in WordPress login handling
+
 ## 🚀 Quick Start
 
 ### 1. Initialize TestFlow in your project
@@ -54,17 +63,24 @@ playwright:
 
 ```javascript
 // tests/e2e/basic-functionality.test.js
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@wordpress/e2e-test-utils-playwright';
 
-test('Plugin loads successfully', async ({ page }) => {
-  await page.goto('/wp-admin/');
-  await page.fill('#user_login', 'admin');
-  await page.fill('#user_pass', 'password');
-  await page.click('#wp-submit');
+test('Plugin loads successfully', async ({ admin, page }) => {
+  // Use WordPress E2E test utilities for seamless admin navigation
+  await admin.visitAdminPage('plugins.php');
   
-  // Verify plugin is active
-  await page.goto('/wp-admin/plugins.php');
-  await expect(page.locator('tr[data-plugin="my-plugin/my-plugin.php"]')).toBeVisible();
+  // Verify plugin is active using official utilities
+  const pluginRow = page.locator('tr[data-slug="my-plugin"]');
+  await expect(pluginRow).toBeVisible();
+  await expect(pluginRow.locator('.activate')).not.toBeVisible(); // Should be inactive link
+});
+
+test('Plugin settings page accessible', async ({ admin, page }) => {
+  // Navigate to plugin settings using admin utilities
+  await admin.visitAdminPage('admin.php?page=my-plugin-settings');
+  
+  // Verify settings page loads
+  await expect(page.locator('.wrap h1')).toContainText('My Plugin Settings');
 });
 ```
 
@@ -178,6 +194,75 @@ profiles:
     playwright:
       testMatch: '**/*.multisite.test.js'
       workers: 1
+```
+
+## 🧪 WordPress E2E Test Utilities
+
+TestFlow integrates the **official WordPress E2E test utilities** for reliable, standardized testing:
+
+### Admin Navigation
+
+```javascript
+import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+
+test('Admin navigation', async ({ admin, page }) => {
+  // Navigate to any admin page
+  await admin.visitAdminPage('plugins.php');
+  await admin.visitAdminPage('themes.php');
+  await admin.visitAdminPage('options-general.php');
+  
+  // Create posts/pages
+  await admin.createNewPost();
+  await admin.createNewPage({ title: 'Test Page' });
+});
+```
+
+### Editor Utilities
+
+```javascript
+test('Gutenberg editor', async ({ admin, editor, page }) => {
+  await admin.createNewPost();
+  
+  // Add blocks using editor utilities
+  await editor.insertBlock({ name: 'core/paragraph' });
+  await page.keyboard.type('Hello WordPress!');
+  
+  // Publish post
+  await editor.publishPost();
+});
+```
+
+### Request Utilities (Fast Operations)
+
+```javascript
+test('Fast plugin operations', async ({ requestUtils }) => {
+  // Fast plugin activation without UI
+  await requestUtils.activatePlugin('my-plugin');
+  await requestUtils.deactivatePlugin('my-plugin');
+  
+  // Fast theme switching
+  await requestUtils.activateTheme('twentytwentythree');
+  
+  // Fast content creation
+  const post = await requestUtils.createPost({
+    title: 'Test Post',
+    content: 'This is a test post',
+    status: 'publish'
+  });
+});
+```
+
+### Authentication & Storage
+
+```javascript
+// Authentication is handled automatically
+test('Authenticated actions', async ({ admin }) => {
+  // Already logged in as admin user
+  await admin.visitAdminPage('users.php');
+  
+  // Storage state is preserved between tests
+  // No need to login repeatedly
+});
 ```
 
 ## 🎯 Plugin Management

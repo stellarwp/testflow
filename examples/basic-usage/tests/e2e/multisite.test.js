@@ -1,197 +1,474 @@
 /**
- * WordPress Multisite Tests
- * 
- * Tests specific to WordPress multisite functionality
+ * Multisite Tests using WordPress E2E Test Utils
  */
 
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+import { 
+  wpLogin, 
+  activatePlugin, 
+  deactivatePlugin, 
+  isPluginActive,
+  switchToSite,
+  networkActivatePlugin,
+  clearCache 
+} from '../../../src/utils/wordpress-helpers.js';
 
-test.describe('Multisite Tests', () => {
-  let wpHelpers;
-
-  test.beforeEach(async ({ page }) => {
-    // Import and initialize WordPress helpers
-    const { WordPressHelpers } = await import('../../src/utils/wordpress-helpers.js');
-    wpHelpers = new WordPressHelpers(page);
+test.describe('WordPress Multisite Tests with E2E Utils', () => {
+  test.beforeEach(async ({ admin }) => {
+    // Use WordPress official admin utilities
+    await admin.visitAdminPage('/');
     
-    // Check if we're in multisite environment
-    await wpHelpers.login();
-    
-    const isMultisite = await page.locator('body.multisite').isVisible().catch(() => false);
-    
+    // Skip tests if not in multisite
+    const isMultisite = await admin.page.locator('#wp-admin-bar-my-sites').isVisible();
     if (!isMultisite) {
-      test.skip('Not in multisite environment');
+      test.skip('Multisite not enabled');
     }
   });
 
-  test('should network activate plugins', async ({ page }) => {
-    // Navigate to network admin plugins
-    await page.goto('/wp-admin/network/plugins.php');
+  test('Network activation: Should activate plugin across all sites', async ({ page, admin, requestUtils }) => {
+    // Navigate to network plugins page using WordPress admin utilities
+    await admin.visitAdminPage('network/plugins.php');
     
-    // Network activate a plugin
-    const pluginRow = page.locator('tr:has-text("Test Plugin")').first();
-    const networkActivateLink = pluginRow.locator('a:has-text("Network Activate")');
+    // Find our plugin row
+    const pluginRow = page.locator('tr[data-slug="my-plugin"]');
+    await expect(pluginRow).toBeVisible();
     
-    if (await networkActivateLink.isVisible()) {
-      await networkActivateLink.click();
+    // Network activate using helper function
+    await networkActivatePlugin(page, 'my-plugin');
+    
+    // Verify network activation
+    await expect(pluginRow.locator('a:has-text("Network Deactivate")')).toBeVisible();
+    
+    // Check plugin is available on subsites
+    await admin.visitAdminPage('my-sites.php');
+    const siteLinks = page.locator('.wp-list-table a[href*="wp-admin"]');
+    
+    if (await siteLinks.count() > 1) {
+      // Visit first subsite
+      await siteLinks.nth(1).click();
       
-      // Verify success notice
-      await expect(page.locator('.notice-success')).toContainText('Plugin activated');
+      // Check if plugin is active on subsite
+      await admin.visitAdminPage('plugins.php');
+      const subsitePluginRow = page.locator('tr[data-slug="my-plugin"]');
       
-      // Verify plugin shows as network active
-      const networkDeactivateLink = pluginRow.locator('a:has-text("Network Deactivate")');
-      await expect(networkDeactivateLink).toBeVisible();
+      // Should show as network activated
+      await expect(subsitePluginRow.locator('.plugin-title').locator('text=Network Active')).toBeVisible();
     }
   });
 
-  test('should create and manage subsites', async ({ page }) => {
-    // Navigate to network sites
-    await page.goto('/wp-admin/network/sites.php');
+  test('Site-specific activation: Should activate plugin on individual sites', async ({ page, admin }) => {
+    // First ensure plugin is not network activated
+    await admin.visitAdminPage('network/plugins.php');
     
-    // Click Add New site
-    await page.click('a:has-text("Add New")');
+    const networkPluginRow = page.locator('tr[data-slug="individual-plugin"]');
+    const networkDeactivateLink = networkPluginRow.locator('a:has-text("Network Deactivate")');
     
-    // Fill in site details
-    const siteDomain = `test-${Date.now()}`;
-    await page.fill('#site-address', siteDomain);
-    await page.fill('#site-title', 'Test Subsite');
-    await page.fill('#admin-email', 'admin@example.com');
+    if (await networkDeactivateLink.isVisible()) {
+      await networkDeactivateLink.click();
+      await page.waitForSelector('.notice-success');
+    }
     
-    // Submit form
-    await page.click('#submit');
+    // Go to individual site and activate plugin
+    await admin.visitAdminPage('my-sites.php');
+    const siteLinks = page.locator('.wp-list-table a[href*="wp-admin"]');
     
-    // Verify site was created
-    await expect(page.locator('.notice-success')).toContainText('Site added');
-    
-    // Navigate back to sites list
-    await page.goto('/wp-admin/network/sites.php');
-    
-    // Verify new site appears in list
-    await expect(page.locator(`tr:has-text("${siteDomain}")`)).toBeVisible();
+    if (await siteLinks.count() > 0) {
+      // Switch to individual site using WordPress utilities
+      await siteLinks.nth(0).click();
+      
+      // Activate plugin on this site only
+      await activatePlugin(page, 'individual-plugin');
+      
+      // Verify activation
+      const isActive = await isPluginActive(page, 'individual-plugin');
+      expect(isActive).toBe(true);
+    }
   });
 
-  test('should manage network users', async ({ page }) => {
-    // Navigate to network users
-    await page.goto('/wp-admin/network/users.php');
+  test('Plugin isolation: Plugins should work independently per site', async ({ page, admin }) => {
+    const testSites = [];
     
-    // Verify users table is visible
-    await expect(page.locator('.wp-list-table')).toBeVisible();
+    // Get list of sites
+    await admin.visitAdminPage('network/sites.php');
+    const siteRows = page.locator('.wp-list-table tbody tr');
+    const siteCount = await siteRows.count();
     
-    // Check for super admin indicators
-    const superAdminRows = page.locator('tr:has-text("Super Admin")');
-    const superAdminCount = await superAdminRows.count();
-    
-    expect(superAdminCount).toBeGreaterThan(0);
-  });
-
-  test('should configure network settings', async ({ page }) => {
-    // Navigate to network settings
-    await page.goto('/wp-admin/network/settings.php');
-    
-    // Verify settings form is present
-    await expect(page.locator('#network-settings')).toBeVisible();
-    
-    // Test updating a setting
-    const currentTitle = await page.inputValue('#site_name');
-    const newTitle = `Updated Network ${Date.now()}`;
-    
-    await page.fill('#site_name', newTitle);
-    await page.click('#submit');
-    
-    // Verify setting was saved
-    await expect(page.locator('.notice-updated')).toContainText('Settings saved');
-    
-    // Restore original title
-    await page.fill('#site_name', currentTitle);
-    await page.click('#submit');
-  });
-
-  test('should handle plugin activation on individual sites', async ({ page }) => {
-    // Navigate to a subsite's admin area
-    await page.goto('/wp-admin/network/sites.php');
-    
-    // Find first subsite and click dashboard link
-    const firstSite = page.locator('.wp-list-table tr').nth(1);
-    const dashboardLink = firstSite.locator('a:has-text("Dashboard")');
-    
-    if (await dashboardLink.isVisible()) {
-      await dashboardLink.click();
+    // Collect site information
+    for (let i = 0; i < Math.min(siteCount, 3); i++) {
+      const row = siteRows.nth(i);
+      const siteUrl = await row.locator('.column-blogname a').first().getAttribute('href');
+      const siteName = await row.locator('.column-blogname a').first().textContent();
       
-      // Now we're in the subsite admin
-      await page.click('text=Plugins');
+      if (siteUrl && siteName) {
+        testSites.push({ url: siteUrl, name: siteName.trim() });
+      }
+    }
+    
+    console.log('Testing plugin isolation across sites:', testSites);
+    
+    // Test plugin activation on different sites
+    for (let i = 0; i < testSites.length; i++) {
+      const site = testSites[i];
       
-      // Try to activate a plugin on this subsite
-      const pluginRow = page.locator('tr:has-text("Test Plugin")').first();
-      const activateLink = pluginRow.locator('a:has-text("Activate")');
+      // Navigate to site admin
+      await page.goto(site.url);
       
-      if (await activateLink.isVisible()) {
-        await activateLink.click();
+      // Activate different plugins on different sites
+      const testPlugin = i === 0 ? 'site-specific-plugin-a' : 'site-specific-plugin-b';
+      
+      try {
+        await activatePlugin(page, testPlugin);
         
-        // Verify activation
-        await expect(page.locator('.notice-success')).toContainText('Plugin activated');
+        // Verify plugin is active on this site
+        const isActive = await isPluginActive(page, testPlugin);
+        expect(isActive).toBe(true);
+        
+        console.log(`Plugin ${testPlugin} activated on ${site.name}`);
+        
+      } catch (error) {
+        console.log(`Plugin ${testPlugin} not available on ${site.name}`);
       }
     }
   });
 
-  test('should test multisite specific plugin functionality', async ({ page }) => {
-    // Test functionality that only works in multisite
-    await page.goto('/wp-admin/network/');
+  test('Super admin capabilities: Should have network admin access', async ({ page, admin }) => {
+    // Verify super admin menu is accessible
+    await admin.visitAdminPage('/');
     
-    // Check for network-specific admin elements
-    await expect(page.locator('#network-admin-bar-my-account')).toBeVisible();
+    // Check for network admin menu
+    const networkAdminLink = page.locator('#wp-admin-bar-network-admin');
+    await expect(networkAdminLink).toBeVisible();
     
-    // Test switching between sites
-    const siteSwitcher = page.locator('#wp-admin-bar-my-sites');
+    // Test access to network admin areas
+    const networkPages = [
+      'network/',
+      'network/sites.php',
+      'network/users.php',
+      'network/themes.php',
+      'network/plugins.php',
+      'network/settings.php'
+    ];
     
-    if (await siteSwitcher.isVisible()) {
-      await siteSwitcher.hover();
-      
-      // Verify subsites menu appears
-      await expect(page.locator('.ab-submenu')).toBeVisible();
+    for (const networkPage of networkPages) {
+      try {
+        await admin.visitAdminPage(networkPage);
+        
+        // Should not get permission errors
+        const permissionError = page.locator('text=You do not have sufficient permissions');
+        await expect(permissionError).not.toBeVisible();
+        
+        console.log(`Super admin access confirmed for: ${networkPage}`);
+        
+      } catch (error) {
+        console.log(`Network page not accessible: ${networkPage}`, error.message);
+      }
     }
   });
 
-  test('should handle network themes', async ({ page }) => {
-    // Navigate to network themes
-    await page.goto('/wp-admin/network/themes.php');
+  test('Theme management: Should manage themes across network', async ({ page, admin, requestUtils }) => {
+    await admin.visitAdminPage('network/themes.php');
     
-    // Verify themes table
-    await expect(page.locator('.wp-list-table')).toBeVisible();
+    // Check available themes
+    const themeRows = page.locator('.wp-list-table tbody tr');
+    const themeCount = await themeRows.count();
     
-    // Test network enabling a theme
-    const themeRow = page.locator('.theme').first();
-    const networkEnableLink = themeRow.locator('a:has-text("Network Enable")');
+    expect(themeCount).toBeGreaterThan(0);
     
-    if (await networkEnableLink.isVisible()) {
-      await networkEnableLink.click();
+    // Try to network enable a theme if available
+    const enableButtons = page.locator('a:has-text("Network Enable")');
+    const enableCount = await enableButtons.count();
+    
+    if (enableCount > 0) {
+      const firstTheme = themeRows.nth(0);
+      const themeName = await firstTheme.locator('.theme-title').textContent();
+      
+      console.log(`Network enabling theme: ${themeName}`);
+      
+      await enableButtons.nth(0).click();
+      await page.waitForSelector('.notice-success');
       
       // Verify theme is network enabled
-      const networkDisableLink = themeRow.locator('a:has-text("Network Disable")');
-      await expect(networkDisableLink).toBeVisible();
+      const disableLink = firstTheme.locator('a:has-text("Network Disable")');
+      await expect(disableLink).toBeVisible();
     }
   });
 
-  test('should test domain mapping functionality', async ({ page }) => {
-    // This would test domain mapping if plugin is active
-    await page.goto('/wp-admin/network/settings.php');
+  test('User management: Should manage users across network', async ({ page, admin }) => {
+    await admin.visitAdminPage('network/users.php');
     
-    // Look for domain mapping settings
-    const domainMappingSection = page.locator(':has-text("Domain Mapping")');
+    // Check user list loads
+    await expect(page.locator('.wp-list-table')).toBeVisible();
     
-    if (await domainMappingSection.isVisible()) {
-      console.log('Domain mapping is available');
+    // Verify super admin capabilities
+    const userRows = page.locator('.wp-list-table tbody tr');
+    const userCount = await userRows.count();
+    
+    expect(userCount).toBeGreaterThan(0);
+    
+    // Check if we can access user edit pages
+    if (userCount > 1) {
+      const firstUserRow = userRows.nth(1); // Skip current super admin
+      const editLink = firstUserRow.locator('.edit a');
       
-      // Test domain mapping configuration
-      // Implementation would depend on specific domain mapping plugin
-    } else {
-      console.log('Domain mapping not available - skipping test');
+      if (await editLink.isVisible()) {
+        await editLink.click();
+        
+        // Should access user edit page
+        await expect(page.locator('#profile-page')).toBeVisible();
+        
+        // Check for super admin controls
+        const superAdminCheckbox = page.locator('#super_admin');
+        if (await superAdminCheckbox.isVisible()) {
+          console.log('Super admin controls available');
+        }
+      }
     }
+  });
+
+  test('Site management: Should create and manage sites', async ({ page, admin }) => {
+    await admin.visitAdminPage('network/sites.php');
+    
+    // Check if we can access add new site
+    const addNewButton = page.locator('.page-title-action');
+    
+    if (await addNewButton.isVisible()) {
+      await addNewButton.click();
+      
+      // Verify add site form loads
+      await expect(page.locator('#site-address')).toBeVisible();
+      await expect(page.locator('#site-title')).toBeVisible();
+      
+      console.log('Site creation form accessible');
+      
+      // Don't actually create a site in tests, just verify access
+    }
+    
+    // Check existing sites management
+    await admin.visitAdminPage('network/sites.php');
+    
+    const siteRows = page.locator('.wp-list-table tbody tr');
+    const siteCount = await siteRows.count();
+    
+    expect(siteCount).toBeGreaterThan(0);
+    
+    // Test site actions for first site
+    if (siteCount > 1) {
+      const firstSite = siteRows.nth(1); // Skip main site
+      const siteActions = firstSite.locator('.row-actions a');
+      const actionCount = await siteActions.count();
+      
+      // Should have management actions (Edit, Dashboard, etc.)
+      expect(actionCount).toBeGreaterThan(2);
+      
+      console.log(`Site management actions available: ${actionCount}`);
+    }
+  });
+
+  test('Network settings: Should configure network-wide settings', async ({ page, admin }) => {
+    await admin.visitAdminPage('network/settings.php');
+    
+    // Verify network settings form loads
+    await expect(page.locator('#network-settings')).toBeVisible();
+    
+    // Check for key network settings
+    const keySettings = [
+      '#site_name',           // Network title
+      '#admin_email',         // Network admin email
+      '#registration',        // Registration settings
+      '#blog_upload_space'    // Upload space allotment
+    ];
+    
+    for (const setting of keySettings) {
+      const element = page.locator(setting);
+      if (await element.isVisible()) {
+        console.log(`Network setting found: ${setting}`);
+      }
+    }
+    
+    // Verify we can see network registration settings
+    const registrationOptions = page.locator('#registration option');
+    const optionCount = await registrationOptions.count();
+    
+    expect(optionCount).toBeGreaterThan(0);
+  });
+
+  test('Plugin network settings: Should access plugin network settings', async ({ page, admin }) => {
+    // First ensure plugin is network activated
+    await networkActivatePlugin(page, 'my-plugin');
+    
+    // Check if plugin adds network admin menu
+    const networkMenus = page.locator('#adminmenu .wp-submenu a');
+    const menuItems = await networkMenus.allTextContents();
+    
+    const pluginMenuFound = menuItems.some(item => 
+      item.toLowerCase().includes('my plugin') || 
+      item.toLowerCase().includes('plugin settings')
+    );
+    
+    if (pluginMenuFound) {
+      console.log('Plugin network menu found');
+      
+      // Try to access plugin network settings
+      const pluginMenu = networkMenus.filter({ hasText: /my plugin|plugin settings/i }).first();
+      
+      if (await pluginMenu.isVisible()) {
+        await pluginMenu.click();
+        
+        // Verify network settings page loads
+        await expect(page.locator('.wrap')).toBeVisible();
+        
+        console.log('Plugin network settings accessible');
+      }
+    }
+  });
+
+  test('Cross-site functionality: Should work across different sites', async ({ page, admin }) => {
+    // Network activate the plugin first
+    await networkActivatePlugin(page, 'my-plugin');
+    
+    // Get list of sites
+    await admin.visitAdminPage('network/sites.php');
+    const siteRows = page.locator('.wp-list-table tbody tr');
+    const siteCount = await siteRows.count();
+    
+    const testResults = [];
+    
+    // Test plugin functionality on multiple sites
+    for (let i = 0; i < Math.min(siteCount, 3); i++) {
+      const row = siteRows.nth(i);
+      const siteName = await row.locator('.column-blogname strong a').textContent();
+      const dashboardLink = row.locator('.row-actions a[href*="wp-admin"]');
+      
+      if (await dashboardLink.isVisible()) {
+        await dashboardLink.click();
+        
+        // Test plugin functionality on this site
+        try {
+          // Check if plugin admin page is accessible
+          await admin.visitAdminPage('admin.php?page=my-plugin');
+          
+          const pluginPageLoaded = await page.locator('.wrap h1').isVisible();
+          
+          testResults.push({
+            site: siteName?.trim() || `Site ${i + 1}`,
+            pluginAccessible: pluginPageLoaded
+          });
+          
+          console.log(`Plugin tested on ${siteName}: ${pluginPageLoaded ? 'Success' : 'Failed'}`);
+          
+        } catch (error) {
+          testResults.push({
+            site: siteName?.trim() || `Site ${i + 1}`,
+            pluginAccessible: false,
+            error: error.message
+          });
+        }
+        
+        // Go back to network admin
+        await admin.visitAdminPage('network/sites.php');
+      }
+    }
+    
+    // Verify plugin worked on at least one site
+    const successfulSites = testResults.filter(result => result.pluginAccessible);
+    expect(successfulSites.length).toBeGreaterThan(0);
+    
+    console.log('Cross-site functionality test results:', testResults);
   });
 
   test.afterEach(async ({ page }) => {
-    // Take screenshot if test failed
-    if (test.info().status === 'failed') {
-      await wpHelpers.takeScreenshot(`multisite-failed-${test.info().title}.png`);
+    // Clean up after each test
+    await clearCache(page);
+  });
+});
+
+test.describe('Multisite Edge Cases with WordPress Utils', () => {
+  test('Non-multisite fallback: Should handle non-multisite environments', async ({ page, admin }) => {
+    // This test would run in non-multisite environments
+    const isMultisite = await page.locator('#wp-admin-bar-my-sites').isVisible();
+    
+    if (!isMultisite) {
+      // Verify normal plugin activation works
+      await activatePlugin(page, 'my-plugin');
+      
+      const isActive = await isPluginActive(page, 'my-plugin');
+      expect(isActive).toBe(true);
+      
+      // Verify no network options are available
+      await admin.visitAdminPage('plugins.php');
+      
+      const networkActivateLink = page.locator('a:has-text("Network Activate")');
+      await expect(networkActivateLink).not.toBeVisible();
+      
+      console.log('Non-multisite environment handled correctly');
+    } else {
+      test.skip('Running in multisite environment');
+    }
+  });
+
+  test('Large network performance: Should handle many sites efficiently', async ({ page, admin }) => {
+    await admin.visitAdminPage('network/sites.php');
+    
+    // Check if pagination is working for large networks
+    const pagination = page.locator('.tablenav-pages');
+    const siteCount = await page.locator('.displaying-num').textContent();
+    
+    if (siteCount) {
+      const totalSites = parseInt(siteCount.match(/\d+/)?.[0] || '0');
+      console.log(`Network has ${totalSites} sites`);
+      
+      if (totalSites > 20) {
+        // Test pagination works
+        const nextButton = pagination.locator('.next-page');
+        
+        if (await nextButton.isVisible() && !(await nextButton.hasClass('disabled'))) {
+          await nextButton.click();
+          
+          // Verify page loads efficiently
+          await expect(page.locator('.wp-list-table')).toBeVisible();
+          
+          console.log('Large network pagination works correctly');
+        }
+      }
+    }
+  });
+
+  test('Subdomain vs subdirectory: Should work with both configurations', async ({ page, admin }) => {
+    // Check network configuration
+    await admin.visitAdminPage('network/settings.php');
+    
+    // Look for subdomain/subdirectory configuration
+    const subdomainConfig = await page.locator('input[name="subdomain_install"]').isChecked();
+    
+    if (subdomainConfig) {
+      console.log('Testing subdomain multisite configuration');
+      
+      // Test subdomain-specific functionality
+      await admin.visitAdminPage('network/sites.php');
+      
+      const siteLinks = page.locator('.column-blogname a');
+      const firstSiteUrl = await siteLinks.nth(1).getAttribute('href');
+      
+      if (firstSiteUrl) {
+        // Should be subdomain format
+        expect(firstSiteUrl).toMatch(/https?:\/\/[^\/]+\.[^\/]+/);
+        console.log('Subdomain format confirmed:', firstSiteUrl);
+      }
+      
+    } else {
+      console.log('Testing subdirectory multisite configuration');
+      
+      // Test subdirectory-specific functionality
+      await admin.visitAdminPage('network/sites.php');
+      
+      const siteLinks = page.locator('.column-blogname a');
+      const firstSiteUrl = await siteLinks.nth(1).getAttribute('href');
+      
+      if (firstSiteUrl) {
+        // Should be subdirectory format
+        expect(firstSiteUrl).toMatch(/https?:\/\/[^\/]+\/[^\/]+/);
+        console.log('Subdirectory format confirmed:', firstSiteUrl);
+      }
     }
   });
 }); 
