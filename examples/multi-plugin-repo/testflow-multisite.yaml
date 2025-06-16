@@ -1,0 +1,36 @@
+# TestFlow Configuration - Multisite Testing
+# Tests plugins in WordPress multisite environment
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+  multisite: true
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.multisite.test.js'
+    - '**/*.network.test.js'
+  timeout: 60000
+  retries: 2
+  workers: 1  # Single worker for multisite stability
+
+plugins:
+  zips:
+    - 'dist/core-plugin.zip'
+    - 'dist/admin-plugin.zip'
+    - 'dist/frontend-plugin.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: false  # Manual activation for network testing
+  activateList: []
+  skipActivation: []
+  networkActivate:
+    - 'core-plugin'  # Network activate core plugin
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site'
+  networkAdmin: true 

@@ -1,0 +1,37 @@
+# TestFlow Configuration - Selective Plugin Activation
+# Used for testing specific plugin combinations
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.selective.test.js'
+    - '**/*.compatibility.test.js'
+  timeout: 35000
+  retries: 2
+  workers: 1
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+    - 'deps/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: false
+  activateList:
+    - 'my-main-plugin'
+    - 'helper-plugin'
+    - 'dependency-plugin'
+  skipActivation:
+    - 'problematic-plugin'
+    - 'conflicting-plugin'
+    - 'dev-only-plugin'
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

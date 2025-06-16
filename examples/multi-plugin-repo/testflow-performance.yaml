@@ -1,0 +1,40 @@
+# TestFlow Configuration - Performance Testing
+# Optimized for performance benchmarking and load testing
+
+lando:
+  php: '8.3'  # Latest PHP for best performance
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.performance.test.js'
+    - '**/*.load.test.js'
+    - '**/*.benchmark.test.js'
+  timeout: 90000  # Longer timeout for performance tests
+  retries: 1      # Fewer retries for consistent metrics
+  workers: 4      # More workers for load testing
+
+plugins:
+  zips:
+    - 'dist/core-plugin.zip'
+    - 'dist/admin-plugin.zip'
+    - 'dist/frontend-plugin.zip'
+    - 'test-plugins/caching-plugin.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList:
+    - 'core-plugin'
+    - 'admin-plugin'
+    - 'frontend-plugin'
+    - 'caching-plugin'
+  skipActivation:
+    - 'debug-plugins'  # No debug plugins for performance testing
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site'
+  debug: false  # Disable debug for performance testing 

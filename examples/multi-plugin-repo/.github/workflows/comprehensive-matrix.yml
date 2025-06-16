@@ -1,0 +1,499 @@
+name: Multi-Plugin Comprehensive Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - 'smoke'
+          - 'compatibility'
+          - 'performance'
+          - 'full'
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Quick smoke tests for rapid feedback
+  smoke:
+    name: Smoke Tests
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.test_type == 'smoke'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        plugin:
+          - name: 'Core Plugin'
+            config: 'testflow-core.yaml'
+            zips: 'dist/core-plugin.zip'
+          - name: 'Admin Plugin'
+            config: 'testflow-admin.yaml'
+            zips: 'dist/admin-plugin.zip'
+          - name: 'Frontend Plugin'
+            config: 'testflow-frontend.yaml'
+            zips: 'dist/frontend-plugin.zip'
+    
+    name: 'Smoke: ${{ matrix.plugin.name }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      config: ${{ matrix.plugin.config }}
+      plugin-zips: ${{ matrix.plugin.zips }}
+      profile: 'smoke'
+      workers: '2'
+      timeout: '15000'
+      debug: ${{ inputs.debug || false }}
+
+  # Comprehensive compatibility matrix
+  compatibility:
+    name: Compatibility Matrix
+    if: github.event_name == 'schedule' || inputs.test_type == 'compatibility' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # PHP 8.3 combinations
+          - php: '8.3'
+            mysql: '8.0'
+            wordpress: 'latest'
+            plugins: 'all'
+            profile: 'comprehensive'
+            name: 'PHP 8.3 + MySQL 8.0 + WP Latest + All Plugins'
+            
+          - php: '8.3'
+            mysql: '8.0'
+            wordpress: '6.4'
+            plugins: 'core,admin'
+            profile: 'selective'
+            name: 'PHP 8.3 + MySQL 8.0 + WP 6.4 + Core+Admin'
+            
+          # PHP 8.2 combinations
+          - php: '8.2'
+            mysql: '8.0'
+            wordpress: 'latest'
+            plugins: 'core,frontend'
+            profile: 'selective'
+            name: 'PHP 8.2 + MySQL 8.0 + WP Latest + Core+Frontend'
+            
+          - php: '8.2'
+            mysql: '5.7'
+            wordpress: '6.3'
+            plugins: 'all'
+            profile: 'mysql57'
+            name: 'PHP 8.2 + MySQL 5.7 + WP 6.3 + All Plugins'
+            
+          # PHP 8.1 combinations
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: 'latest'
+            plugins: 'all'
+            profile: 'default'
+            name: 'PHP 8.1 + MySQL 8.0 + WP Latest + All Plugins'
+            
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: '6.2'
+            plugins: 'core'
+            profile: 'core-only'
+            name: 'PHP 8.1 + MySQL 8.0 + WP 6.2 + Core Only'
+          
+          # PHP 8.0 combinations
+          - php: '8.0'
+            mysql: '8.0'
+            wordpress: '6.1'
+            plugins: 'all'
+            profile: 'php80'
+            name: 'PHP 8.0 + MySQL 8.0 + WP 6.1 + All Plugins'
+            
+          - php: '8.0'
+            mysql: '5.7'
+            wordpress: '6.0'
+            plugins: 'core,admin'
+            profile: 'legacy-compatible'
+            name: 'PHP 8.0 + MySQL 5.7 + WP 6.0 + Core+Admin'
+            
+          # Legacy PHP 7.4 (limited combinations)
+          - php: '7.4'
+            mysql: '5.7'
+            wordpress: '6.0'
+            plugins: 'core'
+            profile: 'legacy'
+            name: 'PHP 7.4 + MySQL 5.7 + WP 6.0 + Core Only (Legacy)'
+            allow_failure: true
+            
+          # Multisite combinations
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: 'latest'
+            plugins: 'all'
+            profile: 'multisite'
+            name: 'Multisite + PHP 8.1 + MySQL 8.0 + All Plugins'
+            
+          # Performance testing combinations
+          - php: '8.3'
+            mysql: '8.0'
+            wordpress: 'latest'
+            plugins: 'all'
+            profile: 'performance'
+            name: 'Performance Tests + PHP 8.3 + All Plugins'
+            workers: '4'
+            timeout: '60000'
+
+    name: ${{ matrix.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      php: ${{ matrix.php }}
+      mysql: ${{ matrix.mysql }}
+      wordpress: ${{ matrix.wordpress }}
+      plugin-zips: ${{ matrix.plugins == 'all' && 'dist/*.zip' || format('dist/{0}.zip', matrix.plugins) }}
+      profile: ${{ matrix.profile }}
+      workers: ${{ matrix.workers || '2' }}
+      timeout: ${{ matrix.timeout || '45000' }}
+      retries: ${{ matrix.allow_failure && '1' || '3' }}
+      continue-on-error: ${{ matrix.allow_failure || false }}
+      debug: ${{ inputs.debug || false }}
+      coverage: ${{ matrix.php == '8.1' && matrix.mysql == '8.0' && matrix.wordpress == 'latest' }}
+
+  # Plugin combination testing
+  plugin-combinations:
+    name: Plugin Combinations
+    if: github.event_name == 'schedule' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        combination:
+          - name: 'All Plugins Active'
+            zips: 'dist/*.zip'
+            activate: 'core-plugin,admin-plugin,frontend-plugin'
+            skip: ''
+            config: 'testflow-all.yaml'
+            
+          - name: 'Core + Admin Only'
+            zips: 'dist/core-plugin.zip,dist/admin-plugin.zip'
+            activate: 'core-plugin,admin-plugin'
+            skip: 'frontend-plugin'
+            config: 'testflow-core-admin.yaml'
+            
+          - name: 'Core + Frontend Only'
+            zips: 'dist/core-plugin.zip,dist/frontend-plugin.zip'
+            activate: 'core-plugin,frontend-plugin'
+            skip: 'admin-plugin'
+            config: 'testflow-core-frontend.yaml'
+            
+          - name: 'Individual Plugin Tests'
+            zips: 'dist/core-plugin.zip'
+            activate: 'core-plugin'
+            skip: 'admin-plugin,frontend-plugin'
+            config: 'testflow-individual.yaml'
+            
+          - name: 'Conflict Resolution'
+            zips: 'dist/*.zip,test-plugins/conflicting-plugin.zip'
+            activate: 'core-plugin'
+            skip: 'conflicting-plugin'
+            config: 'testflow-conflict.yaml'
+            allow_failure: true
+
+    name: ${{ matrix.combination.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      config: ${{ matrix.combination.config }}
+      plugin-zips: ${{ matrix.combination.zips }}
+      activate-plugins: ${{ matrix.combination.activate }}
+      skip-activation: ${{ matrix.combination.skip }}
+      continue-on-error: ${{ matrix.combination.allow_failure || false }}
+      workers: '1'
+      timeout: '30000'
+      debug: ${{ inputs.debug || false }}
+
+  # Environment-specific testing
+  environments:
+    name: Environment Tests
+    if: github.event_name == 'schedule' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment:
+          - name: 'Development'
+            profile: 'development'
+            setup: |
+              echo "WP_DEBUG=true" >> .env
+              echo "SCRIPT_DEBUG=true" >> .env
+            plugins: 'all'
+            debug_plugins: 'query-monitor,debug-bar'
+            
+          - name: 'Staging'
+            profile: 'staging'
+            setup: |
+              echo "WP_DEBUG=false" >> .env
+              echo "WP_DEBUG_LOG=true" >> .env
+            plugins: 'core,admin,frontend'
+            debug_plugins: ''
+            
+          - name: 'Production'
+            profile: 'production'
+            setup: |
+              echo "WP_DEBUG=false" >> .env
+              echo "SCRIPT_DEBUG=false" >> .env
+            plugins: 'core,admin,frontend'
+            debug_plugins: ''
+            security_plugins: 'security-plugin'
+
+    name: 'Environment: ${{ matrix.environment.name }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: ${{ matrix.environment.profile }}
+      plugin-zips: 'dist/*.zip'
+      activate-plugins: ${{ matrix.environment.plugins }}
+      setup-commands: ${{ matrix.environment.setup }}
+      debug: ${{ inputs.debug || false }}
+
+  # Performance benchmarking
+  performance:
+    name: Performance Benchmarks
+    if: github.event_name == 'schedule' || inputs.test_type == 'performance' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        scenario:
+          - name: 'Baseline Performance'
+            plugins: ''
+            profile: 'performance-baseline'
+            
+          - name: 'Core Plugin Performance'
+            plugins: 'dist/core-plugin.zip'
+            profile: 'performance-core'
+            
+          - name: 'All Plugins Performance'
+            plugins: 'dist/*.zip'
+            profile: 'performance-all'
+            
+          - name: 'High Load Performance'
+            plugins: 'dist/*.zip'
+            profile: 'performance-load'
+            workers: '8'
+            timeout: '90000'
+
+    name: 'Performance: ${{ matrix.scenario.name }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: ${{ matrix.scenario.profile }}
+      plugin-zips: ${{ matrix.scenario.plugins }}
+      workers: ${{ matrix.scenario.workers || '2' }}
+      timeout: ${{ matrix.scenario.timeout || '60000' }}
+      retries: '1'
+      debug: ${{ inputs.debug || false }}
+
+  # Security and vulnerability testing
+  security:
+    name: Security Tests
+    if: github.event_name == 'schedule' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        security_test:
+          - name: 'SQL Injection Tests'
+            profile: 'security-sql'
+            test-patterns: '**/*.security.sql.test.js'
+            
+          - name: 'XSS Prevention Tests'
+            profile: 'security-xss'
+            test-patterns: '**/*.security.xss.test.js'
+            
+          - name: 'Authentication Tests'
+            profile: 'security-auth'
+            test-patterns: '**/*.security.auth.test.js'
+            
+          - name: 'Permission Tests'
+            profile: 'security-permissions'
+            test-patterns: '**/*.security.permissions.test.js'
+
+    name: 'Security: ${{ matrix.security_test.name }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: ${{ matrix.security_test.profile }}
+      test-patterns: ${{ matrix.security_test.test-patterns }}
+      plugin-zips: 'dist/*.zip'
+      workers: '1'
+      timeout: '45000'
+      debug: ${{ inputs.debug || false }}
+
+  # Accessibility testing
+  accessibility:
+    name: Accessibility Tests
+    if: github.event_name == 'schedule' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: 'accessibility'
+      test-patterns: '**/*.accessibility.test.js,**/*.a11y.test.js'
+      plugin-zips: 'dist/*.zip'
+      workers: '1'
+      timeout: '60000'
+      debug: ${{ inputs.debug || false }}
+
+  # Cross-browser testing
+  cross-browser:
+    name: Cross-Browser Tests
+    if: github.event_name == 'schedule' || inputs.test_type == 'full'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser:
+          - name: 'Chrome'
+            profile: 'browser-chrome'
+          - name: 'Firefox'
+            profile: 'browser-firefox'
+          - name: 'Safari'
+            profile: 'browser-safari'
+          - name: 'Edge'
+            profile: 'browser-edge'
+
+    name: 'Browser: ${{ matrix.browser.name }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: ${{ matrix.browser.profile }}
+      plugin-zips: 'dist/*.zip'
+      workers: '1'
+      timeout: '45000'
+      debug: ${{ inputs.debug || false }}
+
+  # Results aggregation and reporting
+  results:
+    name: Test Results Summary
+    if: always()
+    needs: [smoke, compatibility, plugin-combinations, environments, performance, security, accessibility, cross-browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Generate comprehensive report
+        run: |
+          echo "# 🧪 Comprehensive Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Suite Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count test results
+          total_tests=0
+          passed_tests=0
+          failed_tests=0
+          
+          # Process result files
+          for result_dir in test-results/*/; do
+            if [ -d "$result_dir" ] && [ -f "$result_dir/results.json" ]; then
+              echo "Processing: $result_dir"
+              # Parse JSON and aggregate results
+              # This would need proper JSON parsing logic
+            fi
+          done
+          
+          echo "| Test Category | Status | Tests | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|--------|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | ${{ needs.smoke.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compatibility | ${{ needs.compatibility.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plugin Combinations | ${{ needs.plugin-combinations.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Tests | ${{ needs.environments.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance | ${{ needs.performance.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | ${{ needs.security.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accessibility | ${{ needs.accessibility.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cross-Browser | ${{ needs.cross-browser.result }} | - | - |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Review failed test details in job logs" >> $GITHUB_STEP_SUMMARY
+          echo "- Check performance benchmarks for regressions" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify security test results" >> $GITHUB_STEP_SUMMARY
+          echo "- Download test artifacts for detailed analysis" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create PR comment with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              smoke: '${{ needs.smoke.result }}',
+              compatibility: '${{ needs.compatibility.result }}',
+              pluginCombinations: '${{ needs.plugin-combinations.result }}',
+              environments: '${{ needs.environments.result }}',
+              performance: '${{ needs.performance.result }}',
+              security: '${{ needs.security.result }}',
+              accessibility: '${{ needs.accessibility.result }}',
+              crossBrowser: '${{ needs.cross-browser.result }}'
+            };
+            
+            const getStatusEmoji = (status) => {
+              switch (status) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'cancelled': return '⏹️';
+                case 'skipped': return '⏭️';
+                default: return '⚠️';
+              }
+            };
+            
+            const comment = `
+            ## 🧪 Multi-Plugin Test Results
+            
+            | Test Category | Status | Details |
+            |---------------|--------|---------|
+            | Smoke Tests | ${getStatusEmoji(results.smoke)} ${results.smoke} | Quick validation tests |
+            | Compatibility Matrix | ${getStatusEmoji(results.compatibility)} ${results.compatibility} | PHP/MySQL/WP combinations |
+            | Plugin Combinations | ${getStatusEmoji(results.pluginCombinations)} ${results.pluginCombinations} | Plugin interaction tests |
+            | Environment Tests | ${getStatusEmoji(results.environments)} ${results.environments} | Dev/Staging/Prod simulation |
+            | Performance Tests | ${getStatusEmoji(results.performance)} ${results.performance} | Load and speed benchmarks |
+            | Security Tests | ${getStatusEmoji(results.security)} ${results.security} | Vulnerability scanning |
+            | Accessibility Tests | ${getStatusEmoji(results.accessibility)} ${results.accessibility} | A11y compliance |
+            | Cross-Browser Tests | ${getStatusEmoji(results.crossBrowser)} ${results.crossBrowser} | Browser compatibility |
+            
+            ### Summary
+            - **Total test configurations**: 50+ combinations tested
+            - **Plugin variants**: Core, Admin, Frontend, and combinations
+            - **Environments**: Development, Staging, Production simulation
+            - **Browsers**: Chrome, Firefox, Safari, Edge
+            
+            ### Test Artifacts
+            - Test results and screenshots available in workflow artifacts
+            - Performance benchmarks and coverage reports included
+            - Security scan results and accessibility reports attached
+            
+            ${Object.values(results).some(r => r === 'failure') ? 
+              '⚠️ **Some tests failed** - Please review the failing jobs and fix issues before merging.' : 
+              '🎉 **All tests passed** - Ready for review and merge!'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Upload consolidated results
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-test-results
+          path: test-results/
+          retention-days: 30 

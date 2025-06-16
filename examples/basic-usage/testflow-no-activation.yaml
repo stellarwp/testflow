@@ -1,0 +1,30 @@
+# TestFlow Configuration - No Plugin Activation
+# Used for testing WordPress core functionality without any plugins
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.core.test.js'
+    - '**/*.no-plugin.test.js'
+  timeout: 20000
+  retries: 2
+  workers: 2
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: false
+  activateList: []
+  skipActivation: ['*']  # Skip all plugins
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

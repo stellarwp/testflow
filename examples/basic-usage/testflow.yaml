@@ -1,0 +1,283 @@
+# TestFlow Multi-Profile Configuration
+# This demonstrates how to have multiple test configurations in a single repository
+
+default:
+  lando:
+    php: '8.1'
+    mysql: '8.0'
+    wordpress: 'latest'
+    
+  playwright:
+    testDir: 'tests/e2e'
+    patterns:
+      - '**/*.test.js'
+      - '**/*.spec.js'
+    timeout: 30000
+    retries: 2
+    workers: 1
+    
+  plugins:
+    zips:
+      - 'dist/*.zip'
+      - 'plugins/*.zip'
+    installPath: '/wp-content/plugins/'
+    preActivate: true
+    activateList: []
+    skipActivation: []
+    
+  wordpress:
+    adminUser: 'admin'
+    adminPassword: 'password'
+    adminEmail: 'admin@example.com'
+    siteUrl: 'https://testflow.lndo.site'
+
+profiles:
+  # Quick smoke tests for rapid feedback
+  smoke:
+    name: 'smoke'
+    description: 'Quick smoke tests for rapid feedback'
+    config:
+      playwright:
+        patterns:
+          - '**/*.smoke.test.js'
+        workers: 2
+        timeout: 15000
+        retries: 1
+      plugins:
+        preActivate: true
+        skipActivation:
+          - 'heavy-plugin'
+          - 'slow-plugin'
+
+  # Comprehensive integration tests
+  integration:
+    name: 'integration'
+    description: 'Full integration test suite'
+    config:
+      playwright:
+        patterns:
+          - '**/*.integration.test.js'
+          - '**/*.e2e.test.js'
+        timeout: 60000
+        retries: 3
+        workers: 1
+      plugins:
+        preActivate: true
+        activateList:
+          - 'required-plugin'
+          - 'dependency-plugin'
+
+  # PHP 7.4 legacy compatibility
+  legacy:
+    name: 'legacy'
+    description: 'PHP 7.4 legacy compatibility tests'
+    config:
+      lando:
+        php: '7.4'
+        mysql: '5.7'
+        wordpress: '6.0'
+      plugins:
+        preActivate: false
+        activateList:
+          - 'main-plugin'
+        skipActivation:
+          - 'php8-only-plugin'
+
+  # PHP 8.0 compatibility
+  php80:
+    name: 'php80'
+    description: 'PHP 8.0 compatibility tests'
+    config:
+      lando:
+        php: '8.0'
+        wordpress: '6.4'
+
+  # MySQL 5.7 compatibility
+  mysql57:
+    name: 'mysql57'
+    description: 'MySQL 5.7 compatibility tests'
+    config:
+      lando:
+        mysql: '5.7'
+      plugins:
+        activateList:
+          - 'mysql-specific-plugin'
+
+  # WordPress 6.4 compatibility
+  wp64:
+    name: 'wp64'
+    description: 'WordPress 6.4 compatibility tests'
+    config:
+      lando:
+        wordpress: '6.4'
+
+  # WordPress 6.3 compatibility
+  wp63:
+    name: 'wp63'
+    description: 'WordPress 6.3 compatibility tests'
+    config:
+      lando:
+        wordpress: '6.3'
+
+  # WordPress Multisite testing
+  multisite:
+    name: 'multisite'
+    description: 'WordPress Multisite configuration'
+    extends: 'default'
+    config:
+      lando:
+        wordpress: 'latest'
+      wordpress:
+        siteUrl: 'https://multisite.lndo.site'
+      playwright:
+        patterns:
+          - '**/*.multisite.test.js'
+        timeout: 45000
+      plugins:
+        preActivate: false
+        activateList:
+          - 'network-activated-plugin'
+          - 'multisite-plugin'
+
+  # Performance testing
+  performance:
+    name: 'performance'
+    description: 'Performance and load testing'
+    config:
+      playwright:
+        patterns:
+          - '**/*.performance.test.js'
+        workers: 4
+        timeout: 120000
+        retries: 1
+      plugins:
+        preActivate: true
+        activateList:
+          - 'performance-plugin'
+          - 'caching-plugin'
+
+  # Full comprehensive test suite
+  comprehensive:
+    name: 'comprehensive'
+    description: 'Complete test suite with all patterns'
+    config:
+      playwright:
+        patterns:
+          - '**/*.test.js'
+          - '**/*.spec.js'
+          - '**/*.e2e.js'
+        workers: 2
+        timeout: 90000
+        retries: 3
+      plugins:
+        preActivate: true
+
+  # Development environment tests
+  development:
+    name: 'development'
+    description: 'Development environment with debug features'
+    config:
+      lando:
+        php: '8.2'
+      wordpress:
+        adminUser: 'dev'
+        adminPassword: 'dev123'
+      playwright:
+        patterns:
+          - '**/*.dev.test.js'
+        timeout: 60000
+      plugins:
+        preActivate: true
+        activateList:
+          - 'query-monitor'
+          - 'debug-bar'
+
+  # Staging environment tests
+  staging:
+    name: 'staging'
+    description: 'Staging environment simulation'
+    config:
+      wordpress:
+        siteUrl: 'https://staging.lndo.site'
+      playwright:
+        patterns:
+          - '**/*.staging.test.js'
+        timeout: 45000
+      plugins:
+        preActivate: false
+        activateList:
+          - 'main-plugin'
+        skipActivation:
+          - 'dev-only-plugin'
+
+  # Production simulation
+  production:
+    name: 'production'
+    description: 'Production environment simulation'
+    config:
+      wordpress:
+        siteUrl: 'https://production.lndo.site'
+      playwright:
+        patterns:
+          - '**/*.production.test.js'
+        timeout: 30000
+        retries: 3
+      plugins:
+        preActivate: false
+        activateList:
+          - 'main-plugin'
+          - 'security-plugin'
+        skipActivation:
+          - 'dev-only-plugin'
+          - 'staging-only-plugin'
+
+  # No plugin activation (for core testing)
+  no-activation:
+    name: 'no-activation'
+    description: 'Tests without any plugin activation'
+    config:
+      plugins:
+        preActivate: false
+        activateList: []
+        skipActivation: ['*']
+      playwright:
+        patterns:
+          - '**/*.core.test.js'
+
+  # Selective plugin activation
+  selective:
+    name: 'selective'
+    description: 'Selective plugin activation for specific tests'
+    config:
+      plugins:
+        preActivate: false
+        activateList:
+          - 'main-plugin'
+          - 'helper-plugin'
+        skipActivation:
+          - 'problematic-plugin'
+          - 'conflicting-plugin'
+
+  # High concurrency testing
+  high-concurrency:
+    name: 'high-concurrency'
+    description: 'High concurrency stress testing'
+    config:
+      playwright:
+        workers: 8
+        timeout: 45000
+        retries: 1
+      plugins:
+        preActivate: true
+
+  # Stress testing with low timeouts
+  stress:
+    name: 'stress'
+    description: 'Stress testing with aggressive timeouts'
+    config:
+      playwright:
+        timeout: 15000
+        retries: 3
+        workers: 1
+      plugins:
+        preActivate: true 

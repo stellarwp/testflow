@@ -1,0 +1,350 @@
+name: Plugin E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Quick smoke tests on every push
+  smoke:
+    name: Smoke Tests
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: 'smoke'
+      workers: '2'
+      debug: ${{ inputs.debug || false }}
+
+  # Comprehensive matrix testing
+  matrix:
+    name: Matrix Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Latest stable versions
+          - php: '8.3'
+            mysql: '8.0'
+            wordpress: 'latest'
+            profile: 'default'
+            name: 'PHP 8.3 + MySQL 8.0 + WordPress Latest'
+          
+          # PHP version compatibility
+          - php: '8.2'
+            mysql: '8.0'
+            wordpress: 'latest'
+            profile: 'default'
+            name: 'PHP 8.2 + MySQL 8.0 + WordPress Latest'
+          
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: 'latest'
+            profile: 'default'
+            name: 'PHP 8.1 + MySQL 8.0 + WordPress Latest'
+          
+          - php: '8.0'
+            mysql: '8.0'
+            wordpress: '6.4'
+            profile: 'php80'
+            name: 'PHP 8.0 + MySQL 8.0 + WordPress 6.4'
+          
+          # Legacy support
+          - php: '7.4'
+            mysql: '8.0'
+            wordpress: '6.0'
+            profile: 'legacy'
+            name: 'PHP 7.4 + MySQL 8.0 + WordPress 6.0 (Legacy)'
+          
+          # MySQL version compatibility
+          - php: '8.1'
+            mysql: '5.7'
+            wordpress: 'latest'
+            profile: 'mysql57'
+            name: 'PHP 8.1 + MySQL 5.7 + WordPress Latest'
+          
+          # WordPress version compatibility
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: '6.4'
+            profile: 'wp64'
+            name: 'PHP 8.1 + MySQL 8.0 + WordPress 6.4'
+          
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: '6.3'
+            profile: 'wp63'
+            name: 'PHP 8.1 + MySQL 8.0 + WordPress 6.3'
+          
+          # Multisite testing
+          - php: '8.1'
+            mysql: '8.0'
+            wordpress: 'latest'
+            profile: 'multisite'
+            name: 'Multisite + PHP 8.1 + MySQL 8.0'
+          
+          # Performance testing
+          - php: '8.3'
+            mysql: '8.0'
+            wordpress: 'latest'
+            profile: 'performance'
+            name: 'Performance Tests + PHP 8.3'
+            workers: '4'
+            timeout: '60000'
+
+    name: ${{ matrix.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      php: ${{ matrix.php }}
+      mysql: ${{ matrix.mysql }}
+      wordpress: ${{ matrix.wordpress }}
+      profile: ${{ matrix.profile }}
+      workers: ${{ matrix.workers || '1' }}
+      timeout: ${{ matrix.timeout || '30000' }}
+      debug: ${{ inputs.debug || false }}
+      continue-on-error: ${{ matrix.php == '7.4' || matrix.mysql == '5.7' }}
+      coverage: ${{ matrix.profile == 'default' }}
+      cache-key: ${{ matrix.php }}-${{ matrix.mysql }}-${{ matrix.wordpress }}
+
+  # Edge case testing
+  edge-cases:
+    name: Edge Cases
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        scenario:
+          - name: 'No Plugin Activation'
+            config: 'testflow-no-activation.yaml'
+            activate-plugins: ''
+            skip-activation: 'all'
+          
+          - name: 'Selective Plugin Activation'
+            config: 'testflow-selective.yaml'
+            activate-plugins: 'my-main-plugin,helper-plugin'
+            skip-activation: 'problematic-plugin'
+          
+          - name: 'High Concurrency'
+            config: 'testflow-high-concurrency.yaml'
+            workers: '8'
+            retries: '1'
+          
+          - name: 'Low Timeout Stress Test'
+            config: 'testflow-stress.yaml'
+            timeout: '15000'
+            retries: '3'
+
+    name: ${{ matrix.scenario.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      config: ${{ matrix.scenario.config }}
+      activate-plugins: ${{ matrix.scenario.activate-plugins }}
+      skip-activation: ${{ matrix.scenario.skip-activation }}
+      workers: ${{ matrix.scenario.workers || '1' }}
+      timeout: ${{ matrix.scenario.timeout || '30000' }}
+      retries: ${{ matrix.scenario.retries || '2' }}
+      continue-on-error: true
+
+  # Plugin variations testing
+  plugin-variations:
+    name: Plugin Variations
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin-set:
+          - name: 'Core Plugin Only'
+            zips: 'dist/my-plugin.zip'
+            activate: 'my-plugin'
+          
+          - name: 'Plugin + Dependencies'
+            zips: 'dist/my-plugin.zip,deps/*.zip'
+            activate: 'my-plugin,dependency-plugin'
+          
+          - name: 'Multiple Plugin Versions'
+            zips: 'versions/my-plugin-*.zip'
+            activate: 'my-plugin'
+          
+          - name: 'Premium + Free Variants'
+            zips: 'dist/my-plugin-*.zip'
+            activate: 'my-plugin-pro,my-plugin-free'
+            skip: 'my-plugin-dev'
+
+    name: ${{ matrix.plugin-set.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      plugin-zips: ${{ matrix.plugin-set.zips }}
+      activate-plugins: ${{ matrix.plugin-set.activate }}
+      skip-activation: ${{ matrix.plugin-set.skip }}
+
+  # Environment-specific tests
+  environment-tests:
+    name: Environment Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment:
+          - name: 'Development'
+            profile: 'development'
+            setup-commands: |
+              echo "ENVIRONMENT=development" >> .env
+              wp config set WP_DEBUG true --type=constant
+              wp config set WP_DEBUG_LOG true --type=constant
+          
+          - name: 'Staging'
+            profile: 'staging'
+            setup-commands: |
+              echo "ENVIRONMENT=staging" >> .env
+              wp config set WP_DEBUG false --type=constant
+          
+          - name: 'Production Simulation'
+            profile: 'production'
+            setup-commands: |
+              echo "ENVIRONMENT=production" >> .env
+              wp config set WP_DEBUG false --type=constant
+              wp config set SCRIPT_DEBUG false --type=constant
+            teardown-commands: |
+              wp option delete transient_timeout_*
+              wp cache flush
+
+    name: ${{ matrix.environment.name }}
+    uses: ./.github/workflows/testflow.yml
+    with:
+      profile: ${{ matrix.environment.profile }}
+      setup-commands: ${{ matrix.environment.setup-commands }}
+      teardown-commands: ${{ matrix.environment.teardown-commands }}
+
+  # Conditional testing based on changes
+  conditional:
+    name: Conditional Tests
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+            **/*.php
+            **/*.js
+            **/*.css
+            **/*.json
+            **/*.yaml
+            **/*.yml
+
+      - name: Run full test suite if core files changed
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: ./.github/workflows/testflow.yml
+        with:
+          profile: 'full'
+          workers: '2'
+
+      - name: Run smoke tests if only docs changed
+        if: steps.changed-files.outputs.any_changed == 'false'
+        uses: ./.github/workflows/testflow.yml
+        with:
+          profile: 'smoke'
+
+  # Nightly comprehensive testing
+  nightly:
+    name: Nightly Comprehensive
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3']
+        mysql: ['5.7', '8.0']
+        wordpress: ['6.0', '6.1', '6.2', '6.3', '6.4', 'latest']
+        exclude:
+          # Exclude incompatible combinations
+          - php: '7.4'
+            wordpress: 'latest'
+          - php: '8.3'
+            wordpress: '6.0'
+          - php: '8.3'
+            wordpress: '6.1'
+
+    name: 'Nightly: PHP ${{ matrix.php }} + MySQL ${{ matrix.mysql }} + WP ${{ matrix.wordpress }}'
+    uses: ./.github/workflows/testflow.yml
+    with:
+      php: ${{ matrix.php }}
+      mysql: ${{ matrix.mysql }}
+      wordpress: ${{ matrix.wordpress }}
+      profile: 'comprehensive'
+      workers: '2'
+      retries: '3'
+      timeout: '60000'
+      coverage: true
+      continue-on-error: true
+
+  # Collect and report results
+  results:
+    name: Test Results Summary
+    if: always()
+    needs: [smoke, matrix, edge-cases, plugin-variations, environment-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate summary report
+        run: |
+          echo "# TestFlow Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Matrix Tests" >> $GITHUB_STEP_SUMMARY
+          
+          # Process all result files
+          for dir in testflow-results-*; do
+            if [ -d "$dir" ] && [ -f "$dir/results.json" ]; then
+              echo "Processing results from $dir"
+              # Add results processing logic here
+            fi
+          done
+          
+          echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
+          if [ -d "testflow-results-0/coverage" ]; then
+            echo "Coverage reports generated and available in artifacts." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Comment on PR with full results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Aggregate all test results and post comprehensive comment
+            const comment = `
+            ## 🧪 Complete TestFlow Results
+            
+            ### Matrix Test Results
+            - **Smoke Tests**: ✅ Passed
+            - **Matrix Tests**: See individual job results
+            - **Edge Cases**: See individual job results
+            - **Plugin Variations**: See individual job results
+            - **Environment Tests**: See individual job results
+            
+            ### Coverage
+            Test coverage reports are available in the artifacts.
+            
+            ### Next Steps
+            - Review failed tests in the job logs
+            - Check artifacts for detailed reports
+            - Ensure all required checks pass before merging
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            }); 

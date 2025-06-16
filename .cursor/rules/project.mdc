@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# TestFlow Definition
+ TestFlow is a project that can be installed a JavaScript dependency, built in Bun. The main objective is running End to End tests for WordPress plugins, using Lando to manage multiple configurations and Playwright to run the tests so that we can run Acceptance tests on to confirm that our plugins are working as expected.
+
+ TestFlow itself doesn't contain any tests for any plugins it's a helper tool that Provides GitHub Workflows and tools to each development team to generate their End to End test to be ran directly with ZIP files and not with Development files.
+
+ ## Development
+This project is all made in TypeScript.

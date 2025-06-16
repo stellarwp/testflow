@@ -1,0 +1,32 @@
+# TestFlow Configuration - High Concurrency Testing
+# Used for stress testing with multiple workers
+
+lando:
+  php: '8.2'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.stress.test.js'
+    - '**/*.concurrency.test.js'
+  timeout: 45000
+  retries: 1
+  workers: 8
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList: []
+  skipActivation:
+    - 'slow-plugin'
+    - 'resource-heavy-plugin'
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

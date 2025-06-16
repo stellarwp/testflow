@@ -1,0 +1,33 @@
+# TestFlow Configuration - Core Plugin Only
+# Tests the core plugin in isolation
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.core.test.js'
+    - '**/*.basic.test.js'
+  timeout: 30000
+  retries: 2
+  workers: 2
+
+plugins:
+  zips:
+    - 'dist/core-plugin.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList:
+    - 'core-plugin'
+  skipActivation:
+    - 'admin-plugin'
+    - 'frontend-plugin'
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

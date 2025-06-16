@@ -1,0 +1,35 @@
+# TestFlow Configuration - All Plugins Active
+# Tests all plugins working together with maximum compatibility
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.test.js'
+    - '**/*.spec.js'
+  timeout: 45000
+  retries: 2
+  workers: 2
+
+plugins:
+  zips:
+    - 'dist/core-plugin.zip'
+    - 'dist/admin-plugin.zip'
+    - 'dist/frontend-plugin.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList:
+    - 'core-plugin'
+    - 'admin-plugin'
+    - 'frontend-plugin'
+  skipActivation: []
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

@@ -1,0 +1,31 @@
+# TestFlow Configuration - Stress Testing
+# Used for aggressive stress testing with tight timeouts
+
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.stress.test.js'
+    - '**/*.timeout.test.js'
+  timeout: 15000  # Aggressive timeout
+  retries: 3      # More retries to handle flakiness
+  workers: 1      # Single worker for consistent results
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList:
+    - 'performance-critical-plugin'
+  skipActivation: []
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site' 

@@ -1,0 +1,54 @@
+{
+  "name": "@stellar/testflow",
+  "version": "1.0.0",
+  "description": "End-to-end testing framework for WordPress plugins using Playwright and Lando",
+  "main": "dist/index.js",
+  "bin": {
+    "testflow": "dist/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --external @playwright/test --external playwright-core",
+    "build:cli": "bun build src/cli.ts --outdir dist --target node --external @playwright/test --external playwright-core",
+    "build:all": "bun run build && bun run build:cli",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
+  },
+  "keywords": [
+    "wordpress",
+    "testing",
+    "playwright",
+    "lando",
+    "e2e",
+    "plugins"
+  ],
+  "author": "Stellar",
+  "license": "MIT",
+  "dependencies": {
+    "@playwright/test": "^1.40.0",
+    "commander": "^11.1.0",
+    "glob": "^10.3.10",
+    "yaml": "^2.3.4",
+    "fs-extra": "^11.2.0",
+    "chalk": "^5.3.0",
+    "ora": "^7.0.1",
+    "archiver": "^6.0.1",
+    "extract-zip": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/fs-extra": "^11.0.4",
+    "@types/archiver": "^6.0.2",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
