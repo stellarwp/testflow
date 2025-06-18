@@ -1,0 +1,113 @@
+# TestFlow Configuration - Instead of WordPress Example
+# This example shows how to use SQL files instead of WordPress installation
+# with automatic URL search and replace functionality
+
+name: "Instead of WordPress Example"
+description: "Use SQL database dump instead of WordPress installation"
+
+# Lando environment configuration
+lando:
+  php: '8.2'
+  mysql: '8.0'
+  wordpress: '6.4'
+
+# Playwright test configuration
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.test.js'
+  timeout: 30000
+  retries: 1
+  workers: 1
+
+# Plugin configuration
+plugins:
+  zips:
+    - 'plugins/*.zip'
+  installPath: 'wp-content/plugins'
+  preActivate: true
+  activateList:
+    - 'my-plugin'
+
+# WordPress configuration (used for admin credentials and site URL)
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site'
+
+# SQL configuration - Instead of WordPress installation
+sql:
+  # SQL files to use instead of WordPress installation
+  files:
+    - 'data/production-backup.sql'
+  
+  # Use SQL files instead of WordPress installation
+  insteadOfWordPress: true
+  
+  # Continue on SQL errors (optional)
+  continueOnError: false
+  
+  # Search and replace configuration for URL corrections
+  searchReplace:
+    enabled: true
+    
+    # URL to replace from the SQL dump
+    fromUrl: 'https://production-site.com'
+    
+    # URL to replace to (will use wordpress.siteUrl if not specified)
+    toUrl: 'https://testflow.lndo.site'
+    
+    # Additional custom replacements
+    additionalReplacements:
+      - from: 'production-cdn.com'
+        to: 'testflow.lndo.site'
+      - from: '/wp-content/uploads/production'
+        to: '/wp-content/uploads'
+
+# Matrix testing with different SQL scenarios
+matrix:
+  environments:
+    - name: 'Clean WordPress Install'
+      description: 'Standard WordPress installation'
+      insteadOfWordPress: false
+      plugins: ['my-plugin']
+    
+    - name: 'Production Data Import'
+      description: 'Import production database with URL replacement'
+      sql_files: ['data/production-backup.sql']
+      insteadOfWordPress: true
+      searchReplace:
+        fromUrl: 'https://production-site.com'
+        toUrl: 'https://testflow.lndo.site'
+      plugins: ['my-plugin', 'production-plugin']
+    
+    - name: 'Staging Data Import'
+      description: 'Import staging database with URL replacement'
+      sql_files: ['data/staging-backup.sql']
+      insteadOfWordPress: true
+      searchReplace:
+        fromUrl: 'https://staging-site.com'
+        toUrl: 'https://testflow.lndo.site'
+      plugins: ['my-plugin']
+    
+    - name: 'Multi-site Setup'
+      description: 'WordPress multisite configuration'
+      sql_files: ['data/multisite-backup.sql']
+      insteadOfWordPress: true
+      searchReplace:
+        fromUrl: 'https://multisite.com'
+        toUrl: 'https://testflow.lndo.site'
+      plugins: ['my-plugin', 'multisite-plugin']
+    
+    - name: 'Legacy Data Migration'
+      description: 'Test with older WordPress data structure'
+      php: '7.4'
+      mysql: '5.7'
+      wordpress: '5.9'
+      sql_files: ['data/legacy-backup.sql']
+      insteadOfWordPress: true
+      searchReplace:
+        fromUrl: 'https://legacy-site.com'
+        toUrl: 'https://testflow.lndo.site'
+      plugins: ['my-plugin'] 

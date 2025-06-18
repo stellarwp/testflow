@@ -6,13 +6,27 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { TestFlowConfig, TestResult } from '../index.js';
+import { TestFlowConfig, TestResult, MatrixConfig } from '../index.js';
 import { LandoManager } from './lando.js';
 import { PluginManager } from './plugins.js';
 import { PlaywrightManager } from './playwright.js';
 
 export interface RunnerOptions {
   debug?: boolean;
+  matrixIndex?: number;
+  insteadOfWordPress?: boolean;
+  searchReplaceFromUrl?: string;
+  searchReplaceToUrl?: string;
+}
+
+export interface MatrixRunResult {
+  name: string;
+  result: TestResult;
+  config: TestFlowConfig;
+  matrixIndex: number;
+  sqlFiles?: string[];
+  plugins?: string[];
+  environment?: string;
 }
 
 export class TestFlowRunner {
@@ -34,142 +48,378 @@ export class TestFlowRunner {
     this.config = config;
     this.options = options;
     
-    this.landoManager = new LandoManager(config.lando);
-    this.pluginManager = new PluginManager(config.plugins);
-    this.playwrightManager = new PlaywrightManager(config.playwright);
+    // Apply CLI overrides to SQL config
+    if (options.insteadOfWordPress) {
+      this.config.sql = {
+        ...this.config.sql,
+        insteadOfWordPress: true,
+        searchReplace: {
+          ...this.config.sql?.searchReplace,
+          enabled: true,
+          fromUrl: options.searchReplaceFromUrl || this.config.sql?.searchReplace?.fromUrl,
+          toUrl: options.searchReplaceToUrl || this.config.sql?.searchReplace?.toUrl || this.config.wordpress.siteUrl
+        }
+      };
+    }
+    
+    this.landoManager = new LandoManager(
+      this.config.lando,
+      this.config.sql,
+      this.config.wordpress
+    );
+    this.pluginManager = new PluginManager(this.config.plugins);
+    this.playwrightManager = new PlaywrightManager(this.config.playwright);
   }
 
   /**
-   * Run the complete test flow.
+   * Run tests with current configuration.
    * 
-   * @returns {Promise<TestResult>} - Test execution results.
+   * @returns {Promise<TestResult>} - Test results.
    * 
    * @since TBD
    */
   async run(): Promise<TestResult> {
-    console.log(chalk.blue('🚀 Starting TestFlow...'));
-    console.log(chalk.gray(`   PHP: ${this.config.lando.php}`));
-    console.log(chalk.gray(`   MySQL: ${this.config.lando.mysql}`));
-    console.log(chalk.gray(`   WordPress: ${this.config.lando.wordpress}`));
-    console.log();
-
-    let results: TestResult = {
-      passed: 0,
-      failed: 0,
-      skipped: 0,
-      total: 0,
-      duration: 0,
-      failures: []
-    };
-
+    const spinner = ora('Initializing TestFlow...').start();
+    
     try {
-      // Setup Lando environment
-      const setupSpinner = ora('Setting up Lando environment...').start();
+      // Setup environment
+      spinner.text = 'Setting up Lando environment...';
       await this.landoManager.setup();
-      setupSpinner.succeed('Lando environment ready');
-
-      // Install WordPress
-      const wpSpinner = ora('Installing WordPress...').start();
-      await this.landoManager.installWordPress(this.config.wordpress);
-      wpSpinner.succeed('WordPress installed');
-
-      // Install and activate plugins
-      const pluginSpinner = ora('Installing plugins...').start();
-      const pluginPaths = await this.pluginManager.resolvePluginZips();
       
-      for (const pluginPath of pluginPaths) {
-        await this.pluginManager.installPlugin(pluginPath);
+      // Execute SQL files before plugins if configured
+      if (this.config.sql && !this.config.sql.insteadOfWordPress) {
+        const stage = this.config.sql.executeOrder || 'after-wordpress';
+        if (stage === 'before-plugins' && this.config.sql.files) {
+          await this.landoManager.executeSqlFiles('before-plugins', this.config.sql.files);
+        }
       }
       
-      pluginSpinner.succeed(`Plugins installed (${pluginPaths.length})`);
+      // Setup plugins
+      spinner.text = 'Setting up plugins...';
+      await this.pluginManager.setup();
       
-      // Activate plugins based on configuration
-      const activationSpinner = ora('Activating plugins...').start();
-      await this.pluginManager.activatePlugins();
-      activationSpinner.succeed('Plugins activated');
-
+      // Execute SQL files after plugins if configured
+      if (this.config.sql && !this.config.sql.insteadOfWordPress) {
+        const stage = this.config.sql.executeOrder || 'after-wordpress';
+        if (stage === 'after-plugins' && this.config.sql.files) {
+          await this.landoManager.executeSqlFiles('after-plugins', this.config.sql.files);
+        }
+      }
+      
+      spinner.succeed('Environment setup completed');
+      
       // Run tests
       const testSpinner = ora('Running Playwright tests...').start();
-      results = await this.playwrightManager.runTests();
+      const results = await this.playwrightManager.runTests();
       
       if (results.failed > 0) {
-        testSpinner.fail(`Tests completed with ${results.failed} failure(s)`);
+        testSpinner.fail(`Tests completed with ${results.failed} failures`);
       } else {
-        testSpinner.succeed(`All tests passed (${results.passed})`);
+        testSpinner.succeed(`All ${results.passed} tests passed`);
+      }
+      
+      return results;
+      
+    } catch (error) {
+      spinner.fail(`TestFlow execution failed: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Run tests with matrix configuration.
+   * 
+   * @returns {Promise<MatrixRunResult[]>} - Matrix test results.
+   * 
+   * @since TBD
+   */
+  async runWithMatrix(): Promise<MatrixRunResult[]> {
+    if (!this.config.matrix) {
+      // Run single configuration if no matrix
+      const result = await this.run();
+      return [{
+        name: 'Default Configuration',
+        result,
+        config: this.config,
+        matrixIndex: 0
+      }];
+    }
+
+    const results: MatrixRunResult[] = [];
+    const matrixConfigurations = this.generateMatrixConfigurations();
+
+    console.log(chalk.blue(`🔄 Running ${matrixConfigurations.length} matrix configurations...`));
+
+    for (let i = 0; i < matrixConfigurations.length; i++) {
+      // Skip if specific matrix index requested
+      if (this.options.matrixIndex !== undefined && this.options.matrixIndex !== i) {
+        continue;
       }
 
-      // Display results
-      this.displayResults(results);
+      const matrixConfig = matrixConfigurations[i];
+      
+      console.log(chalk.yellow(`\n📋 Matrix ${i + 1}/${matrixConfigurations.length}: ${matrixConfig.name}`));
+      
+      if (matrixConfig.sqlFiles && matrixConfig.sqlFiles.length > 0) {
+        console.log(chalk.gray(`   SQL Files: ${matrixConfig.sqlFiles.join(', ')}`));
+      }
+      
+      if (matrixConfig.plugins && matrixConfig.plugins.length > 0) {
+        console.log(chalk.gray(`   Plugins: ${matrixConfig.plugins.join(', ')}`));
+      }
+      
+      if (matrixConfig.environment) {
+        console.log(chalk.gray(`   Environment: ${matrixConfig.environment}`));
+      }
 
-    } catch (error) {
-      console.error(chalk.red(`❌ Test execution failed: ${error}`));
-      throw error;
-    } finally {
-      // Cleanup
-      await this.cleanup();
+      try {
+        // Create runner with matrix configuration
+        const runner = new TestFlowRunner(matrixConfig.config, {
+          ...this.options,
+          insteadOfWordPress: matrixConfig.insteadOfWordPress
+        });
+        
+        const result = await runner.run();
+        
+        results.push({
+          name: matrixConfig.name,
+          result,
+          config: matrixConfig.config,
+          matrixIndex: i,
+          sqlFiles: matrixConfig.sqlFiles,
+          plugins: matrixConfig.plugins,
+          environment: matrixConfig.environment
+        });
+        
+        // Clean up between matrix runs
+        await runner.cleanup();
+        
+      } catch (error) {
+        console.error(chalk.red(`❌ Matrix configuration ${i + 1} failed: ${error}`));
+        
+        results.push({
+          name: matrixConfig.name,
+          result: {
+            passed: 0,
+            failed: 1,
+            skipped: 0,
+            duration: 0,
+            errors: [String(error)]
+          },
+          config: matrixConfig.config,
+          matrixIndex: i,
+          sqlFiles: matrixConfig.sqlFiles,
+          plugins: matrixConfig.plugins,
+          environment: matrixConfig.environment
+        });
+      }
     }
+
+    // Print matrix summary
+    this.printMatrixSummary(results);
 
     return results;
   }
 
   /**
-   * Display test results summary.
+   * Generate matrix configurations.
    * 
-   * @param {TestResult} results - Test execution results.
+   * @returns {Array} - Array of matrix configurations.
    * 
    * @private
    * 
    * @since TBD
    */
-  private displayResults(results: TestResult): void {
-    console.log('\n' + chalk.blue('📊 Test Results Summary'));
-    console.log(chalk.gray('═'.repeat(50)));
-    
-    console.log(chalk.green(`✅ Passed: ${results.passed}`));
-    console.log(chalk.red(`❌ Failed: ${results.failed}`));
-    console.log(chalk.yellow(`⏭️  Skipped: ${results.skipped}`));
-    console.log(chalk.blue(`📈 Total: ${results.total}`));
-    console.log(chalk.gray(`⏱️  Duration: ${(results.duration / 1000).toFixed(2)}s`));
-    
-    if (results.failures.length > 0) {
-      console.log('\n' + chalk.red('💥 Test Failures:'));
-      console.log(chalk.gray('─'.repeat(50)));
-      
-      for (const failure of results.failures) {
-        console.log(chalk.red(`❌ ${failure.test}`));
-        console.log(chalk.gray(`   File: ${failure.file}`));
-        if (failure.line) {
-          console.log(chalk.gray(`   Line: ${failure.line}`));
+  private generateMatrixConfigurations(): Array<{
+    name: string;
+    config: TestFlowConfig;
+    sqlFiles?: string[];
+    plugins?: string[];
+    environment?: string;
+    insteadOfWordPress?: boolean;
+  }> {
+    const configurations: Array<{
+      name: string;
+      config: TestFlowConfig;
+      sqlFiles?: string[];
+      plugins?: string[];
+      environment?: string;
+      insteadOfWordPress?: boolean;
+    }> = [];
+
+    if (!this.config.matrix) {
+      return configurations;
+    }
+
+    // Handle environment-specific configurations
+    if (this.config.matrix.environments) {
+      for (const env of this.config.matrix.environments) {
+        const config = { ...this.config };
+        
+        // Apply environment overrides
+        if (env.php) config.lando.php = env.php;
+        if (env.mysql) config.lando.mysql = env.mysql;
+        if (env.wordpress) config.lando.wordpress = env.wordpress;
+        
+        // Apply SQL files
+        if (env.sql_files) {
+          config.sql = {
+            ...config.sql,
+            files: env.sql_files,
+            insteadOfWordPress: env.insteadOfWordPress || false
+          };
+          
+          // Apply search and replace if specified
+          if (env.searchReplace) {
+            config.sql.searchReplace = {
+              ...config.sql.searchReplace,
+              enabled: true,
+              fromUrl: env.searchReplace.fromUrl,
+              toUrl: env.searchReplace.toUrl || config.wordpress.siteUrl
+            };
+          }
         }
-        console.log(chalk.gray(`   Error: ${failure.error}`));
-        console.log();
+        
+        // Apply plugins
+        if (env.plugins) {
+          config.plugins = {
+            ...config.plugins,
+            activateList: env.plugins
+          };
+        }
+
+        configurations.push({
+          name: env.name,
+          config,
+          sqlFiles: env.sql_files,
+          plugins: env.plugins,
+          environment: env.name,
+          insteadOfWordPress: env.insteadOfWordPress
+        });
       }
     }
-    
-    console.log(chalk.gray('═'.repeat(50)));
-    
-    if (results.failed > 0) {
-      console.log(chalk.red('❌ Tests failed!'));
-    } else {
-      console.log(chalk.green('✅ All tests passed!'));
+
+    // Handle simple matrix combinations
+    if (this.config.matrix.sql_files || this.config.matrix.plugin_combinations) {
+      const sqlMatrix = this.config.matrix.sql_files || [[]];
+      const pluginMatrix = this.config.matrix.plugin_combinations || [[]];
+
+      for (let sqlIndex = 0; sqlIndex < sqlMatrix.length; sqlIndex++) {
+        for (let pluginIndex = 0; pluginIndex < pluginMatrix.length; pluginIndex++) {
+          const sqlFiles = sqlMatrix[sqlIndex];
+          const plugins = pluginMatrix[pluginIndex];
+          
+          const config = { ...this.config };
+          
+          // Apply SQL files
+          if (sqlFiles.length > 0) {
+            config.sql = {
+              ...config.sql,
+              files: sqlFiles
+            };
+          }
+          
+          // Apply plugins
+          if (plugins.length > 0) {
+            config.plugins = {
+              ...config.plugins,
+              activateList: plugins
+            };
+          }
+
+          const name = this.generateMatrixName(sqlFiles, plugins);
+          
+          configurations.push({
+            name,
+            config,
+            sqlFiles: sqlFiles.length > 0 ? sqlFiles : undefined,
+            plugins: plugins.length > 0 ? plugins : undefined
+          });
+        }
+      }
     }
+
+    return configurations;
   }
 
   /**
-   * Get plugin manager instance for external access.
+   * Generate matrix configuration name.
    * 
-   * @returns {PluginManager} - Plugin manager instance.
+   * @param {string[]} sqlFiles - SQL files.
+   * @param {string[]} plugins  - Plugins.
+   * 
+   * @returns {string} - Configuration name.
+   * 
+   * @private
    * 
    * @since TBD
    */
-  getPluginManager(): PluginManager {
-    return this.pluginManager;
+  private generateMatrixName(sqlFiles: string[], plugins: string[]): string {
+    const parts: string[] = [];
+    
+    if (sqlFiles.length > 0) {
+      parts.push(`SQL: ${sqlFiles.map(f => f.split('/').pop()).join(', ')}`);
+    } else {
+      parts.push('Clean Install');
+    }
+    
+    if (plugins.length > 0) {
+      parts.push(`Plugins: ${plugins.join(', ')}`);
+    } else {
+      parts.push('No Plugins');
+    }
+    
+    return parts.join(' | ');
   }
 
   /**
-   * Get Lando manager instance for external access.
+   * Print matrix summary.
    * 
-   * @returns {LandoManager} - Lando manager instance.
+   * @param {MatrixRunResult[]} results - Matrix results.
+   * 
+   * @private
+   * 
+   * @since TBD
+   */
+  private printMatrixSummary(results: MatrixRunResult[]): void {
+    console.log(chalk.blue('\n📊 Matrix Test Summary:'));
+    console.log(chalk.gray('═'.repeat(80)));
+    
+    let totalPassed = 0;
+    let totalFailed = 0;
+    let totalSkipped = 0;
+    
+    for (const result of results) {
+      const status = result.result.failed > 0 ? 
+        chalk.red('❌ FAILED') : 
+        chalk.green('✅ PASSED');
+      
+      console.log(`${status} ${result.name}`);
+      console.log(chalk.gray(`   Passed: ${result.result.passed}, Failed: ${result.result.failed}, Skipped: ${result.result.skipped}`));
+      
+      if (result.result.errors && result.result.errors.length > 0) {
+        console.log(chalk.red(`   Errors: ${result.result.errors.join(', ')}`));
+      }
+      
+      totalPassed += result.result.passed;
+      totalFailed += result.result.failed;
+      totalSkipped += result.result.skipped;
+    }
+    
+    console.log(chalk.gray('═'.repeat(80)));
+    console.log(chalk.blue(`Total: ${totalPassed} passed, ${totalFailed} failed, ${totalSkipped} skipped`));
+    
+    if (totalFailed > 0) {
+      console.log(chalk.red(`\n❌ ${totalFailed} matrix configurations failed`));
+    } else {
+      console.log(chalk.green(`\n✅ All ${results.length} matrix configurations passed`));
+    }
+  }
+
+  /**
+   * Get Lando manager instance.
+   * 
+   * @returns {LandoManager} - Lando manager.
    * 
    * @since TBD
    */
@@ -178,33 +428,30 @@ export class TestFlowRunner {
   }
 
   /**
-   * Get Playwright manager instance for external access.
-   * 
-   * @returns {PlaywrightManager} - Playwright manager instance.
+   * Clean up test environment.
    * 
    * @since TBD
    */
-  getPlaywrightManager(): PlaywrightManager {
-    return this.playwrightManager;
-  }
-
-  /**
-   * Cleanup resources and temporary files.
-   * 
-   * @private
-   * 
-   * @since TBD
-   */
-  private async cleanup(): Promise<void> {
-    if (this.options.debug) {
-      console.log(chalk.gray('Debug mode: Skipping cleanup'));
-      return;
-    }
-
+  async cleanup(): Promise<void> {
     try {
-      await this.pluginManager.cleanup();
+      await this.landoManager.stop();
     } catch (error) {
       console.warn(chalk.yellow(`Warning: Cleanup failed: ${error}`));
     }
   }
+
+  /**
+   * Destroy test environment.
+   * 
+   * @since TBD
+   */
+  async destroy(): Promise<void> {
+    try {
+      await this.landoManager.destroy();
+    } catch (error) {
+      console.warn(chalk.yellow(`Warning: Destroy failed: ${error}`));
+    }
+  }
+} 
+} 
 } 

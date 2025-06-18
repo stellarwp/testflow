@@ -1,0 +1,217 @@
+# TestFlow Configuration - Mixed Matrix Testing
+# This demonstrates combining SQL files, plugin combinations, and environments in a single matrix
+
+name: 'Mixed Matrix Testing'
+description: 'Comprehensive testing with SQL files, plugin combinations, and environment variations'
+
+# Base configuration
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.test.js'
+  timeout: 60000
+  retries: 3
+  workers: 1
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: false  # Let matrix control activation
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site'
+
+# SQL configuration
+sql:
+  executeOrder: 'after-wordpress'
+  continueOnError: false
+
+# Comprehensive matrix configuration
+matrix:
+  # Test different SQL data scenarios
+  sql_files:
+    - []  # Clean install
+    - ['sql/minimal-data.sql']
+    - ['sql/user-data.sql', 'sql/content-data.sql']
+    - ['sql/ecommerce-data.sql']
+
+  # Test different plugin combinations
+  plugin_combinations:
+    - []  # No plugins
+    - ['core-plugin']
+    - ['core-plugin', 'helper-plugin']
+    - ['core-plugin', 'helper-plugin', 'extension-plugin']
+
+  # Test different environments
+  environments:
+    # Modern environment with minimal data
+    - name: 'Modern + Minimal'
+      php: '8.3'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/minimal-data.sql']
+      plugins: ['core-plugin']
+
+    # Standard environment with user data
+    - name: 'Standard + Users'
+      php: '8.1'
+      mysql: '8.0'
+      wordpress: '6.4'
+      sql_files: ['sql/user-data.sql', 'sql/roles-data.sql']
+      plugins: ['core-plugin', 'helper-plugin']
+
+    # Legacy environment with full data
+    - name: 'Legacy + Full Data'
+      php: '7.4'
+      mysql: '5.7'
+      wordpress: '6.0'
+      sql_files: ['sql/legacy-data.sql', 'sql/content-data.sql']
+      plugins: ['core-plugin']
+
+    # E-commerce environment
+    - name: 'E-commerce Setup'
+      php: '8.2'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/woocommerce-data.sql', 'sql/products-data.sql']
+      plugins: ['core-plugin', 'woocommerce-integration']
+
+    # Performance testing environment
+    - name: 'Performance Test'
+      php: '8.3'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/large-dataset.sql']
+      plugins: ['core-plugin', 'caching-plugin']
+
+    # Multisite environment
+    - name: 'Multisite'
+      php: '8.1'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/multisite-data.sql']
+      plugins: ['core-plugin']
+
+    # Development environment
+    - name: 'Development'
+      php: '8.2'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/dev-data.sql']
+      plugins: ['core-plugin', 'debug-plugin', 'query-monitor']
+
+    # Staging mirror
+    - name: 'Staging Mirror'
+      php: '8.1'
+      mysql: '8.0'
+      wordpress: '6.4'
+      sql_files: ['sql/staging-subset.sql']
+      plugins: ['core-plugin', 'helper-plugin', 'analytics-plugin']
+
+    # Security testing
+    - name: 'Security Test'
+      php: '8.1'
+      mysql: '8.0'
+      wordpress: 'latest'
+      sql_files: ['sql/security-test-data.sql']
+      plugins: ['core-plugin', 'security-plugin']
+
+    # Compatibility testing
+    - name: 'Compatibility Test'
+      php: '8.0'
+      mysql: '5.7'
+      wordpress: '6.2'
+      sql_files: ['sql/compatibility-data.sql']
+      plugins: ['core-plugin', 'legacy-plugin']
+
+# Profiles for specific testing scenarios
+profiles:
+  quick:
+    name: 'quick'
+    description: 'Quick testing with minimal matrix'
+    config:
+      matrix:
+        environments:
+          - name: 'Quick Test'
+            sql_files: ['sql/minimal-data.sql']
+            plugins: ['core-plugin']
+
+  comprehensive:
+    name: 'comprehensive'
+    description: 'Full matrix testing'
+    config:
+      # Uses the full matrix defined above
+      playwright:
+        timeout: 90000
+        retries: 2
+
+  sql-focused:
+    name: 'sql-focused'
+    description: 'Focus on SQL data variations'
+    config:
+      matrix:
+        sql_files:
+          - []
+          - ['sql/users.sql']
+          - ['sql/content.sql']
+          - ['sql/ecommerce.sql']
+          - ['sql/performance.sql']
+        plugin_combinations:
+          - ['core-plugin']  # Single plugin combination
+        environments:
+          - name: 'Standard'
+            php: '8.1'
+            mysql: '8.0'
+
+  plugin-focused:
+    name: 'plugin-focused'
+    description: 'Focus on plugin combinations'
+    config:
+      matrix:
+        sql_files:
+          - ['sql/standard-data.sql']  # Single SQL set
+        plugin_combinations:
+          - []
+          - ['core-plugin']
+          - ['core-plugin', 'helper-plugin']
+          - ['core-plugin', 'helper-plugin', 'extension-plugin']
+          - ['core-plugin', 'alternative-plugin']
+        environments:
+          - name: 'Standard'
+            php: '8.1'
+            mysql: '8.0'
+
+  environment-focused:
+    name: 'environment-focused'
+    description: 'Focus on environment variations'
+    config:
+      matrix:
+        sql_files:
+          - ['sql/standard-data.sql']
+        plugin_combinations:
+          - ['core-plugin']
+        environments:
+          - name: 'PHP 8.3'
+            php: '8.3'
+            mysql: '8.0'
+          - name: 'PHP 8.2'
+            php: '8.2'
+            mysql: '8.0'
+          - name: 'PHP 8.1'
+            php: '8.1'
+            mysql: '8.0'
+          - name: 'PHP 8.0'
+            php: '8.0'
+            mysql: '5.7'
+          - name: 'PHP 7.4'
+            php: '7.4'
+            mysql: '5.7' 

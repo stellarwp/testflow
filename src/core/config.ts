@@ -6,7 +6,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { parse, stringify } from 'yaml';
-import { TestFlowConfig } from '../index.js';
+import { TestFlowConfig, MultiConfig } from '../index.js';
 import chalk from 'chalk';
 
 export interface ConfigProfile {
@@ -19,6 +19,16 @@ export interface ConfigProfile {
 export interface MultiConfig {
   default?: TestFlowConfig;
   profiles?: { [key: string]: ConfigProfile };
+}
+
+export interface InitOptions {
+  name?: string;
+  multiProfile?: boolean;
+  withSql?: boolean;
+  withMatrix?: boolean;
+  php?: string;
+  mysql?: string;
+  wordpress?: string;
 }
 
 export class ConfigManager {
@@ -38,121 +48,368 @@ export class ConfigManager {
   /**
    * Load configuration from file.
    * 
-   * @param {string} profile - Configuration profile to load.
+   * @param {string} configPath - Configuration file path.
+   * @param {string} profile    - Profile name to load.
    * 
-   * @returns {Promise<TestFlowConfig>} - Parsed configuration.
+   * @returns {Promise<TestFlowConfig>} - Loaded configuration.
    * 
    * @since TBD
    */
-  async loadConfig(profile?: string): Promise<TestFlowConfig> {
-    if (!existsSync(this.configPath)) {
-      throw new Error(`Configuration file not found: ${this.configPath}`);
+  async loadConfig(configPath: string, profile?: string): Promise<TestFlowConfig> {
+    if (!existsSync(configPath)) {
+      throw new Error(`Configuration file not found: ${configPath}`);
     }
 
-    try {
-      const content = readFileSync(this.configPath, 'utf8');
-      const rawConfig = parse(content);
-      
-      let config: TestFlowConfig;
-      
-      // Check if this is a multi-config file
-      if (rawConfig.profiles || rawConfig.default) {
-        config = await this.loadMultiConfig(rawConfig as MultiConfig, profile);
+    const content = readFileSync(configPath, 'utf8');
+    const parsed = parse(content) as TestFlowConfig | MultiConfig;
+
+    // Handle multi-profile configuration
+    if (this.isMultiConfig(parsed)) {
+      if (profile) {
+        if (!parsed.profiles || !parsed.profiles[profile]) {
+          throw new Error(`Profile '${profile}' not found in configuration`);
+        }
+        
+        const profileConfig = parsed.profiles[profile];
+        const baseConfig = parsed.default || this.getDefaultConfig();
+        
+        return this.mergeConfigs(baseConfig, profileConfig.config);
       } else {
-        config = rawConfig as TestFlowConfig;
+        return parsed.default || this.getDefaultConfig();
       }
-      
-      // Set defaults
-      config.playwright.timeout = config.playwright.timeout || 30000;
-      config.playwright.retries = config.playwright.retries || 2;
-      config.playwright.workers = config.playwright.workers || 1;
-      config.playwright.patterns = config.playwright.patterns || ['**/*.test.js', '**/*.spec.js'];
-      
-      config.plugins.installPath = config.plugins.installPath || '/wp-content/plugins/';
-      config.plugins.preActivate = config.plugins.preActivate !== false;
-      config.plugins.activateList = config.plugins.activateList || [];
-      config.plugins.skipActivation = config.plugins.skipActivation || [];
-      
-      config.wordpress.adminUser = config.wordpress.adminUser || 'admin';
-      config.wordpress.adminPassword = config.wordpress.adminPassword || 'password';
-      config.wordpress.adminEmail = config.wordpress.adminEmail || 'admin@example.com';
-      config.wordpress.siteUrl = config.wordpress.siteUrl || 'https://testflow.lndo.site';
-      
-      return config;
-    } catch (error) {
-      throw new Error(`Failed to parse configuration: ${error}`);
     }
+
+    return parsed as TestFlowConfig;
   }
 
   /**
-   * Load configuration from multi-config file.
+   * Initialize configuration file.
    * 
-   * @param {MultiConfig} multiConfig - Multi-configuration object.
-   * @param {string}      profile     - Profile to load.
-   * 
-   * @returns {Promise<TestFlowConfig>} - Resolved configuration.
-   * 
-   * @private
+   * @param {InitOptions} options - Initialization options.
    * 
    * @since TBD
    */
-  private async loadMultiConfig(multiConfig: MultiConfig, profile?: string): Promise<TestFlowConfig> {
-    let baseConfig: TestFlowConfig;
+  async initConfig(options: InitOptions = {}): Promise<void> {
+    const configPath = 'testflow.yaml';
     
-    if (profile && multiConfig.profiles && multiConfig.profiles[profile]) {
-      const profileConfig = multiConfig.profiles[profile];
-      
-      // Start with default config if available
-      baseConfig = multiConfig.default ? { ...multiConfig.default } : {} as TestFlowConfig;
-      
-      // Handle extends
-      if (profileConfig.extends && multiConfig.profiles[profileConfig.extends]) {
-        const extendedConfig = multiConfig.profiles[profileConfig.extends];
-        baseConfig = this.mergeConfigs(baseConfig, extendedConfig.config);
-      }
-      
-      // Apply profile config
-      baseConfig = this.mergeConfigs(baseConfig, profileConfig.config);
-      
-      console.log(chalk.blue(`📋 Using profile: ${profile}`));
-      if (profileConfig.description) {
-        console.log(chalk.gray(`   ${profileConfig.description}`));
-      }
-      
-    } else if (multiConfig.default) {
-      baseConfig = multiConfig.default;
-      console.log(chalk.blue('📋 Using default configuration'));
+    if (existsSync(configPath)) {
+      throw new Error('Configuration file already exists. Use --force to overwrite.');
+    }
+
+    let config: TestFlowConfig | MultiConfig;
+
+    if (options.multiProfile) {
+      config = this.createMultiProfileConfig(options);
     } else {
-      throw new Error(`Profile '${profile}' not found and no default configuration available`);
+      config = this.createSingleConfig(options);
     }
-    
-    return baseConfig;
+
+    const yamlContent = stringify(config, {
+      indent: 2,
+      lineWidth: 120,
+      noRefs: true
+    });
+
+    writeFileSync(configPath, yamlContent, 'utf8');
+    console.log(chalk.green(`✅ Configuration initialized: ${configPath}`));
   }
 
   /**
-   * Merge two configuration objects.
+   * Create single configuration.
    * 
-   * @param {any} base   - Base configuration.
-   * @param {any} extend - Configuration to merge.
+   * @param {InitOptions} options - Configuration options.
    * 
-   * @returns {any} - Merged configuration.
+   * @returns {TestFlowConfig} - Single configuration.
    * 
    * @private
    * 
    * @since TBD
    */
-  private mergeConfigs(base: any, extend: any): any {
-    const result = { ...base };
-    
-    for (const [key, value] of Object.entries(extend)) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        result[key] = this.mergeConfigs(result[key] || {}, value);
-      } else {
-        result[key] = value;
+  private createSingleConfig(options: InitOptions): TestFlowConfig {
+    const config: TestFlowConfig = {
+      name: options.name || 'TestFlow Project',
+      description: 'WordPress Plugin Testing with TestFlow',
+      lando: {
+        php: options.php || '8.2',
+        mysql: options.mysql || '8.0',
+        wordpress: options.wordpress || '6.4'
+      },
+      playwright: {
+        testDir: 'tests/e2e',
+        patterns: ['**/*.test.js'],
+        timeout: 30000,
+        retries: 1,
+        workers: 1
+      },
+      plugins: {
+        zips: ['plugins/*.zip'],
+        installPath: 'wp-content/plugins',
+        preActivate: true
+      },
+      wordpress: {
+        adminUser: 'admin',
+        adminPassword: 'password',
+        adminEmail: 'admin@example.com',
+        siteUrl: 'https://testflow.lndo.site'
       }
+    };
+
+    if (options.withSql) {
+      config.sql = {
+        files: [
+          'data/setup.sql',
+          'data/test-data.sql'
+        ],
+        executeOrder: 'after-wordpress',
+        continueOnError: false,
+        insteadOfWordPress: false,
+        searchReplace: {
+          enabled: false,
+          fromUrl: 'https://production-site.com',
+          toUrl: 'https://testflow.lndo.site',
+          additionalReplacements: [
+            {
+              from: 'production-domain.com',
+              to: 'testflow.lndo.site'
+            }
+          ]
+        }
+      };
     }
-    
-    return result;
+
+    if (options.withMatrix) {
+      config.matrix = {
+        sql_files: [
+          [], // Clean WordPress installation
+          ['data/minimal.sql'], // Minimal data set
+          ['data/setup.sql', 'data/users.sql'], // Standard setup
+          ['data/full-dataset.sql'] // Complete data set
+        ],
+        plugin_combinations: [
+          [], // No plugins
+          ['core-plugin'], // Core plugin only
+          ['core-plugin', 'extension-plugin'], // Core + extension
+          ['core-plugin', 'extension-plugin', 'utility-plugin'] // All plugins
+        ],
+        environments: [
+          {
+            name: 'Clean Install',
+            sql_files: [],
+            plugins: ['core-plugin'],
+            insteadOfWordPress: false
+          },
+          {
+            name: 'Production Data Import',
+            sql_files: ['data/production-backup.sql'],
+            plugins: ['core-plugin', 'extension-plugin'],
+            insteadOfWordPress: true,
+            searchReplace: {
+              fromUrl: 'https://production-site.com',
+              toUrl: 'https://testflow.lndo.site'
+            }
+          },
+          {
+            name: 'Staging Data Import',
+            sql_files: ['data/staging-backup.sql'],
+            plugins: ['core-plugin'],
+            insteadOfWordPress: true,
+            searchReplace: {
+              fromUrl: 'https://staging-site.com',
+              toUrl: 'https://testflow.lndo.site'
+            }
+          },
+          {
+            name: 'Multi-site Setup',
+            php: '8.1',
+            mysql: '8.0',
+            sql_files: ['data/multisite.sql'],
+            plugins: ['core-plugin', 'multisite-plugin'],
+            insteadOfWordPress: true
+          }
+        ]
+      };
+    }
+
+    return config;
+  }
+
+  /**
+   * Create multi-profile configuration.
+   * 
+   * @param {InitOptions} options - Configuration options.
+   * 
+   * @returns {MultiConfig} - Multi-profile configuration.
+   * 
+   * @private
+   * 
+   * @since TBD
+   */
+  private createMultiProfileConfig(options: InitOptions): MultiConfig {
+    const defaultConfig = this.createSingleConfig(options);
+
+    return {
+      default: defaultConfig,
+      profiles: {
+        'quick': {
+          name: 'quick',
+          description: 'Quick smoke tests',
+          config: {
+            playwright: {
+              testDir: 'tests/e2e',
+              patterns: ['**/*.smoke.test.js'],
+              timeout: 15000,
+              retries: 0,
+              workers: 1
+            }
+          }
+        },
+        'sql-instead-wp': {
+          name: 'sql-instead-wp',
+          description: 'Use SQL data instead of WordPress installation',
+          config: {
+            sql: {
+              files: ['data/production-backup.sql'],
+              insteadOfWordPress: true,
+              searchReplace: {
+                enabled: true,
+                fromUrl: 'https://production-site.com',
+                toUrl: 'https://testflow.lndo.site'
+              }
+            }
+          }
+        },
+        'staging-import': {
+          name: 'staging-import',
+          description: 'Import staging data with URL replacement',
+          config: {
+            sql: {
+              files: ['data/staging-backup.sql'],
+              insteadOfWordPress: true,
+              searchReplace: {
+                enabled: true,
+                fromUrl: 'https://staging-site.com',
+                toUrl: 'https://testflow.lndo.site',
+                additionalReplacements: [
+                  {
+                    from: 'staging-cdn.com',
+                    to: 'testflow.lndo.site'
+                  }
+                ]
+              }
+            }
+          }
+        },
+        'legacy': {
+          name: 'legacy',
+          description: 'Legacy PHP/MySQL compatibility testing',
+          config: {
+            lando: {
+              php: '7.4',
+              mysql: '5.7',
+              wordpress: '6.0'
+            },
+            sql: {
+              files: ['data/legacy-data.sql'],
+              executeOrder: 'after-wordpress'
+            }
+          }
+        },
+        'performance': {
+          name: 'performance',
+          description: 'Performance testing with large dataset',
+          config: {
+            sql: {
+              files: ['data/large-dataset.sql'],
+              executeOrder: 'after-wordpress'
+            },
+            playwright: {
+              testDir: 'tests/performance',
+              patterns: ['**/*.perf.test.js'],
+              timeout: 60000,
+              retries: 0,
+              workers: 1
+            }
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Get default configuration.
+   * 
+   * @returns {TestFlowConfig} - Default configuration.
+   * 
+   * @private
+   * 
+   * @since TBD
+   */
+  private getDefaultConfig(): TestFlowConfig {
+    return {
+      lando: {
+        php: '8.2',
+        mysql: '8.0',
+        wordpress: '6.4'
+      },
+      playwright: {
+        testDir: 'tests/e2e',
+        patterns: ['**/*.test.js'],
+        timeout: 30000,
+        retries: 1,
+        workers: 1
+      },
+      plugins: {
+        zips: ['plugins/*.zip'],
+        installPath: 'wp-content/plugins',
+        preActivate: true
+      },
+      wordpress: {
+        adminUser: 'admin',
+        adminPassword: 'password',
+        adminEmail: 'admin@example.com',
+        siteUrl: 'https://testflow.lndo.site'
+      }
+    };
+  }
+
+  /**
+   * Check if configuration is multi-profile.
+   * 
+   * @param {any} config - Configuration object.
+   * 
+   * @returns {boolean} - True if multi-profile configuration.
+   * 
+   * @private
+   * 
+   * @since TBD
+   */
+  private isMultiConfig(config: any): config is MultiConfig {
+    return config.profiles !== undefined || config.default !== undefined;
+  }
+
+  /**
+   * Merge configurations.
+   * 
+   * @param {TestFlowConfig}         base     - Base configuration.
+   * @param {Partial<TestFlowConfig>} override - Override configuration.
+   * 
+   * @returns {TestFlowConfig} - Merged configuration.
+   * 
+   * @private
+   * 
+   * @since TBD
+   */
+  private mergeConfigs(base: TestFlowConfig, override: Partial<TestFlowConfig>): TestFlowConfig {
+    return {
+      ...base,
+      ...override,
+      lando: { ...base.lando, ...override.lando },
+      playwright: { ...base.playwright, ...override.playwright },
+      plugins: { ...base.plugins, ...override.plugins },
+      wordpress: { ...base.wordpress, ...override.wordpress },
+      sql: override.sql ? { ...base.sql, ...override.sql } : base.sql,
+      matrix: override.matrix ? { ...base.matrix, ...override.matrix } : base.matrix
+    };
   }
 
   /**
@@ -180,167 +437,6 @@ export class ConfigManager {
       console.warn(chalk.yellow(`Failed to list profiles: ${error}`));
       return [];
     }
-  }
-
-  /**
-   * Initialize default configuration file.
-   * 
-   * @param {boolean} force      - Whether to overwrite existing file.
-   * @param {boolean} multiConfig - Whether to create multi-config format.
-   * 
-   * @since TBD
-   */
-  async initConfig(force: boolean = false, multiConfig: boolean = false): Promise<void> {
-    if (existsSync(this.configPath) && !force) {
-      throw new Error(`Configuration file already exists: ${this.configPath}. Use --force to overwrite.`);
-    }
-
-    let configContent: string;
-    
-    if (multiConfig) {
-      configContent = this.generateMultiConfig();
-    } else {
-      configContent = this.generateSingleConfig();
-    }
-
-    try {
-      writeFileSync(this.configPath, configContent, 'utf8');
-      console.log(chalk.green(`✅ Configuration file created: ${this.configPath}`));
-    } catch (error) {
-      throw new Error(`Failed to create configuration file: ${error}`);
-    }
-  }
-
-  /**
-   * Generate single configuration format.
-   * 
-   * @returns {string} - YAML configuration content.
-   * 
-   * @private
-   * 
-   * @since TBD
-   */
-  private generateSingleConfig(): string {
-    const defaultConfig: TestFlowConfig = {
-      lando: {
-        php: '8.1',
-        mysql: '8.0',
-        wordpress: 'latest'
-      },
-      playwright: {
-        testDir: 'tests/e2e',
-        patterns: ['**/*.test.js', '**/*.spec.js'],
-        timeout: 30000,
-        retries: 2,
-        workers: 1
-      },
-      plugins: {
-        zips: ['plugins/*.zip'],
-        installPath: '/wp-content/plugins/',
-        preActivate: true,
-        activateList: [],
-        skipActivation: []
-      },
-      wordpress: {
-        adminUser: 'admin',
-        adminPassword: 'password',
-        adminEmail: 'admin@example.com',
-        siteUrl: 'https://testflow.lndo.site'
-      }
-    };
-
-    return stringify(defaultConfig, { indent: 2, lineWidth: 80 });
-  }
-
-  /**
-   * Generate multi-configuration format.
-   * 
-   * @returns {string} - YAML configuration content.
-   * 
-   * @private
-   * 
-   * @since TBD
-   */
-  private generateMultiConfig(): string {
-    const multiConfig: MultiConfig = {
-      default: {
-        lando: {
-          php: '8.1',
-          mysql: '8.0',
-          wordpress: 'latest'
-        },
-        playwright: {
-          testDir: 'tests/e2e',
-          patterns: ['**/*.test.js', '**/*.spec.js'],
-          timeout: 30000,
-          retries: 2,
-          workers: 1
-        },
-        plugins: {
-          zips: ['plugins/*.zip'],
-          installPath: '/wp-content/plugins/',
-          preActivate: true
-        },
-        wordpress: {
-          adminUser: 'admin',
-          adminPassword: 'password',
-          adminEmail: 'admin@example.com',
-          siteUrl: 'https://testflow.lndo.site'
-        }
-      },
-      profiles: {
-        'smoke': {
-          name: 'smoke',
-          description: 'Quick smoke tests',
-          config: {
-            playwright: {
-              patterns: ['**/*.smoke.test.js'],
-              workers: 2,
-              timeout: 15000
-            }
-          }
-        },
-        'integration': {
-          name: 'integration',
-          description: 'Full integration tests',
-          config: {
-            playwright: {
-              patterns: ['**/*.integration.test.js'],
-              timeout: 60000,
-              retries: 3
-            }
-          }
-        },
-        'php74': {
-          name: 'php74',
-          description: 'PHP 7.4 compatibility tests',
-          config: {
-            lando: {
-              php: '7.4',
-              wordpress: '6.0'
-            }
-          }
-        },
-        'multisite': {
-          name: 'multisite',
-          description: 'WordPress Multisite tests',
-          extends: 'default',
-          config: {
-            lando: {
-              wordpress: 'latest'
-            },
-            wordpress: {
-              siteUrl: 'https://multisite.lndo.site'
-            },
-            plugins: {
-              activateList: ['my-plugin']
-            }
-          }
-        }
-      }
-    };
-
-    return stringify(multiConfig, { indent: 2, lineWidth: 80 });
   }
 
   /**

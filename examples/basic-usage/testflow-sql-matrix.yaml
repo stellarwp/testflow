@@ -1,0 +1,105 @@
+# TestFlow Configuration - SQL Files Matrix Testing
+# This demonstrates how to use SQL files in a matrix to test different database states
+
+name: 'SQL Matrix Testing'
+description: 'Test WordPress plugins with different database configurations and data sets'
+
+# Base configuration
+lando:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+
+playwright:
+  testDir: 'tests/e2e'
+  patterns:
+    - '**/*.test.js'
+    - '**/*.sql.test.js'  # SQL-specific tests
+  timeout: 45000
+  retries: 2
+  workers: 1
+
+plugins:
+  zips:
+    - 'dist/*.zip'
+  installPath: '/wp-content/plugins/'
+  preActivate: true
+  activateList:
+    - 'my-plugin'
+
+wordpress:
+  adminUser: 'admin'
+  adminPassword: 'password'
+  adminEmail: 'admin@example.com'
+  siteUrl: 'https://testflow.lndo.site'
+
+# SQL configuration - default behavior
+sql:
+  executeOrder: 'after-wordpress'
+  continueOnError: false
+
+# Matrix configuration for different SQL scenarios
+matrix:
+  sql_files:
+    # Scenario 1: Clean WordPress installation (no additional SQL)
+    - []
+    
+    # Scenario 2: Basic test data
+    - ['sql/basic-data.sql']
+    
+    # Scenario 3: User accounts and roles
+    - ['sql/users.sql', 'sql/roles.sql']
+    
+    # Scenario 4: E-commerce setup (WooCommerce data)
+    - ['sql/woocommerce-setup.sql', 'sql/products.sql', 'sql/orders.sql']
+    
+    # Scenario 5: Content-heavy site
+    - ['sql/posts.sql', 'sql/pages.sql', 'sql/media.sql', 'sql/comments.sql']
+    
+    # Scenario 6: Multisite data
+    - ['sql/multisite-setup.sql', 'sql/network-sites.sql']
+    
+    # Scenario 7: Custom post types and fields
+    - ['sql/custom-post-types.sql', 'sql/custom-fields.sql', 'sql/taxonomies.sql']
+    
+    # Scenario 8: Performance testing data (large dataset)
+    - ['sql/performance-setup.sql', 'sql/large-dataset.sql']
+    
+    # Scenario 9: Migration testing (legacy data)
+    - ['sql/legacy-schema.sql', 'sql/migration-data.sql']
+    
+    # Scenario 10: Full production-like environment
+    - [
+        'sql/production-users.sql',
+        'sql/production-content.sql',
+        'sql/production-settings.sql',
+        'sql/production-plugins.sql'
+      ]
+
+# Environment-specific SQL configurations
+environments:
+  - name: 'Fresh Install'
+    sql_files: []
+    description: 'Clean WordPress installation for baseline testing'
+  
+  - name: 'Development Data'
+    sql_files: ['sql/dev-users.sql', 'sql/dev-content.sql']
+    description: 'Development environment with sample data'
+  
+  - name: 'Staging Mirror'
+    sql_files: ['sql/staging-dump.sql']
+    description: 'Mirror of staging environment data'
+  
+  - name: 'Production Subset'
+    sql_files: ['sql/production-subset.sql']
+    description: 'Subset of production data for realistic testing'
+
+# Test patterns for different SQL scenarios
+test_patterns:
+  clean: '**/*.clean.test.js'        # Tests for clean installation
+  data: '**/*.data.test.js'          # Tests that require specific data
+  users: '**/*.users.test.js'        # Tests for user-related functionality
+  content: '**/*.content.test.js'    # Tests for content management
+  ecommerce: '**/*.ecommerce.test.js' # E-commerce specific tests
+  performance: '**/*.perf.test.js'   # Performance tests with large datasets
+  migration: '**/*.migration.test.js' # Migration and compatibility tests 
