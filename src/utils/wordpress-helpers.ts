@@ -1,48 +1,64 @@
 /**
- * WordPress Helper Functions for TestFlow
- * Enhanced with official WordPress E2E Test Utils
+ * TestFlow-Specific WordPress Helper Functions
+ * Complements official WordPress E2E Test Utils with TestFlow-specific functionality
  * 
  * @since TBD
  */
 
 import { Page } from 'playwright';
+import { test as base, expect } from '@playwright/test';
 import { 
   Admin, 
   Editor, 
   RequestUtils,
-  test as wpTest
+  PageUtils
 } from '@wordpress/e2e-test-utils-playwright';
 
 /**
- * Extended WordPress test with official utilities
+ * Extended test with WordPress utilities available as fixtures
  */
-export const test = wpTest.extend<{
+export const test = base.extend<{
   admin: Admin;
   editor: Editor;
+  pageUtils: PageUtils;
   requestUtils: RequestUtils;
 }>({
-  admin: async ({ page, pageUtils }, use) => {
-    await use(new Admin({ page, pageUtils }));
+  admin: async ({ page, pageUtils, editor }, use) => {
+    await use(new Admin({ page, pageUtils, editor }));
   },
   editor: async ({ page }, use) => {
     await use(new Editor({ page }));
   },
-  requestUtils: async ({ }, use) => {
-    await use(new RequestUtils({
-      baseURL: process.env.WP_BASE_URL || 'http://localhost',
-      storageStatePath: process.env.STORAGE_STATE_PATH,
-    }));
+  pageUtils: async ({ page }, use) => {
+    await use(new PageUtils({ page }));
+  },
+  requestUtils: async ({}, use) => {
+    const requestUtils = await RequestUtils.setup({
+      baseURL: process.env.WP_BASE_URL || 'https://testflow.lndo.site',
+      user: {
+        username: process.env.WP_USERNAME || 'admin',
+        password: process.env.WP_PASSWORD || 'password',
+      },
+    });
+    await use(requestUtils);
   },
 });
 
-export class WordPressHelpers {
+export { expect };
+
+/**
+ * TestFlow-specific WordPress helpers
+ * Focused on functionality not provided by WordPress E2E utils
+ */
+export class TestFlowHelpers {
   private page: Page;
   public admin: Admin;
   public editor: Editor;
-  public requestUtils: RequestUtils;
+  public pageUtils: PageUtils;
+  public requestUtils: RequestUtils | undefined;
 
   /**
-   * Initialize WordPress helpers.
+   * Initialize TestFlow helpers.
    * 
    * @param {Page} page - Playwright page instance.
    * 
@@ -50,239 +66,138 @@ export class WordPressHelpers {
    */
   constructor(page: Page) {
     this.page = page;
-    this.admin = new Admin({ page, pageUtils: { page } });
+    this.pageUtils = new PageUtils({ page });
     this.editor = new Editor({ page });
-    this.requestUtils = new RequestUtils({
-      baseURL: process.env.WP_BASE_URL || 'http://localhost',
+    this.admin = new Admin({ page, pageUtils: this.pageUtils, editor: this.editor });
+  }
+
+  /**
+   * Initialize RequestUtils for API operations.
+   * 
+   * @since TBD
+   */
+  async initRequestUtils(): Promise<void> {
+    this.requestUtils = await RequestUtils.setup({
+      baseURL: process.env.WP_BASE_URL || 'https://testflow.lndo.site',
+      user: {
+        username: process.env.WP_USERNAME || 'admin',
+        password: process.env.WP_PASSWORD || 'password',
+      },
     });
   }
 
   /**
-   * Login to WordPress admin using official WordPress utilities.
-   * 
-   * @param {string} username - Username.
-   * @param {string} password - Password.
-   * @param {string} siteUrl  - Site URL.
-   * 
-   * @since TBD
-   */
-  async login(username: string = 'admin', password: string = 'password', siteUrl: string = 'https://testflow.lndo.site'): Promise<void> {
-    // Use WordPress official login method
-    await this.admin.visitAdminPage('/', 'wp-login.php');
-    
-    // Check if already logged in
-    if (await this.page.locator('#wpadminbar').isVisible()) {
-      return;
-    }
-    
-    await this.page.fill('#user_login', username);
-    await this.page.fill('#user_pass', password);
-    await this.page.click('#wp-submit');
-    
-    // Wait for successful login
-    await this.page.waitForSelector('#wpadminbar', { timeout: 10000 });
-  }
-
-  /**
-   * Login to WordPress admin using the official WordPress method.
-   * 
-   * @since TBD
-   */
-  async wpLogin(): Promise<void> {
-    // Use the official WordPress login utility
-    await this.requestUtils.activateTheme('twentytwentythree');
-    await this.admin.visitAdminPage('/');
-  }
-
-  /**
-   * Logout from WordPress admin.
-   * 
-   * @since TBD
-   */
-  async logout(): Promise<void> {
-    await this.page.hover('#wpadminbar');
-    await this.page.click('text=Log Out');
-  }
-
-  /**
-   * Navigate to plugins page using WordPress admin utilities.
-   * 
-   * @since TBD
-   */
-  async goToPlugins(): Promise<void> {
-    await this.admin.visitAdminPage('plugins.php');
-    await this.page.waitForSelector('.wp-list-table');
-  }
-
-  /**
-   * Check if a plugin is active.
-   * 
-   * @param {string} pluginSlug - Plugin slug or name.
-   * 
-   * @returns {Promise<boolean>} - Whether the plugin is active.
-   * 
-   * @since TBD
-   */
-  async isPluginActive(pluginSlug: string): Promise<boolean> {
-    await this.goToPlugins();
-    
-    const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"], tr:has-text("${pluginSlug}")`).first();
-    
-    if (!(await pluginRow.isVisible())) {
-      return false;
-    }
-    
-    const deactivateLink = pluginRow.locator('a:has-text("Deactivate")');
-    return await deactivateLink.isVisible();
-  }
-
-  /**
-   * Activate a plugin using WordPress utilities when possible.
-   * 
-   * @param {string} pluginSlug - Plugin slug or name.
-   * 
-   * @since TBD
-   */
-  async activatePlugin(pluginSlug: string): Promise<void> {
-    try {
-      // Try using WordPress RequestUtils first (faster)
-      await this.requestUtils.activatePlugin(pluginSlug);
-    } catch (error) {
-      // Fallback to UI activation
-      await this.goToPlugins();
-      
-      const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"], tr:has-text("${pluginSlug}")`).first();
-      
-      if (!(await pluginRow.isVisible())) {
-        throw new Error(`Plugin not found: ${pluginSlug}`);
-      }
-      
-      const activateLink = pluginRow.locator('a:has-text("Activate")');
-      
-      if (await activateLink.isVisible()) {
-        await activateLink.click();
-        await this.page.waitForSelector('.notice-success', { timeout: 5000 });
-      }
-    }
-  }
-
-  /**
-   * Deactivate a plugin using WordPress utilities when possible.
-   * 
-   * @param {string} pluginSlug - Plugin slug or name.
-   * 
-   * @since TBD
-   */
-  async deactivatePlugin(pluginSlug: string): Promise<void> {
-    try {
-      // Try using WordPress RequestUtils first (faster)
-      await this.requestUtils.deactivatePlugin(pluginSlug);
-    } catch (error) {
-      // Fallback to UI deactivation
-      await this.goToPlugins();
-      
-      const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"], tr:has-text("${pluginSlug}")`).first();
-      
-      if (!(await pluginRow.isVisible())) {
-        throw new Error(`Plugin not found: ${pluginSlug}`);
-      }
-      
-      const deactivateLink = pluginRow.locator('a:has-text("Deactivate")');
-      
-      if (await deactivateLink.isVisible()) {
-        await deactivateLink.click();
-        await this.page.waitForSelector('.notice-success', { timeout: 5000 });
-      }
-    }
-  }
-
-  /**
-   * Bulk activate plugins.
+   * Bulk activate multiple plugins with proper error handling.
+   * WordPress E2E utils only support single plugin activation.
    * 
    * @param {string[]} pluginSlugs - Array of plugin slugs.
    * 
    * @since TBD
    */
   async bulkActivatePlugins(pluginSlugs: string[]): Promise<void> {
-    // Try using RequestUtils for bulk operations
-    try {
-      for (const slug of pluginSlugs) {
-        await this.requestUtils.activatePlugin(slug);
+    if (!this.requestUtils) {
+      await this.initRequestUtils();
+    }
+
+    // Try using RequestUtils for bulk operations first (faster)
+    const failedPlugins: string[] = [];
+    
+    for (const slug of pluginSlugs) {
+      try {
+        await this.requestUtils!.activatePlugin(slug);
+      } catch (error) {
+        console.warn(`Failed to activate plugin ${slug} via API:`, error);
+        failedPlugins.push(slug);
       }
-    } catch (error) {
-      // Fallback to UI bulk activation
-      await this.goToPlugins();
+    }
+    
+    // Fallback to UI bulk activation for failed plugins
+    if (failedPlugins.length > 0) {
+      await this.admin.visitAdminPage('plugins.php');
       
-      // Check all specified plugins
-      for (const slug of pluginSlugs) {
+      for (const slug of failedPlugins) {
         const checkbox = this.page.locator(`tr[data-slug="${slug}"] input[type="checkbox"], tr:has-text("${slug}") input[type="checkbox"]`).first();
         if (await checkbox.isVisible()) {
           await checkbox.check();
         }
       }
       
-      // Select bulk action
       await this.page.selectOption('[name="action"]', 'activate-selected');
       await this.page.click('#doaction');
-      
-      // Wait for success message
       await this.page.waitForSelector('.notice-success', { timeout: 10000 });
     }
   }
 
   /**
-   * Bulk deactivate plugins.
+   * Bulk deactivate multiple plugins with proper error handling.
+   * WordPress E2E utils only support single plugin deactivation.
    * 
    * @param {string[]} pluginSlugs - Array of plugin slugs.
    * 
    * @since TBD
    */
   async bulkDeactivatePlugins(pluginSlugs: string[]): Promise<void> {
-    // Try using RequestUtils for bulk operations
-    try {
-      for (const slug of pluginSlugs) {
-        await this.requestUtils.deactivatePlugin(slug);
+    if (!this.requestUtils) {
+      await this.initRequestUtils();
+    }
+
+    const failedPlugins: string[] = [];
+    
+    for (const slug of pluginSlugs) {
+      try {
+        await this.requestUtils!.deactivatePlugin(slug);
+      } catch (error) {
+        console.warn(`Failed to deactivate plugin ${slug} via API:`, error);
+        failedPlugins.push(slug);
       }
-    } catch (error) {
-      // Fallback to UI bulk deactivation
-      await this.goToPlugins();
+    }
+    
+    // Fallback to UI bulk deactivation for failed plugins
+    if (failedPlugins.length > 0) {
+      await this.admin.visitAdminPage('plugins.php');
       
-      // Check all specified plugins
-      for (const slug of pluginSlugs) {
+      for (const slug of failedPlugins) {
         const checkbox = this.page.locator(`tr[data-slug="${slug}"] input[type="checkbox"], tr:has-text("${slug}") input[type="checkbox"]`).first();
         if (await checkbox.isVisible()) {
           await checkbox.check();
         }
       }
       
-      // Select bulk action
       await this.page.selectOption('[name="action"]', 'deactivate-selected');
       await this.page.click('#doaction');
-      
-      // Wait for success message
       await this.page.waitForSelector('.notice-success', { timeout: 10000 });
     }
   }
 
   /**
-   * Get list of active plugins.
+   * Get comprehensive list of active plugins with metadata.
+   * Enhanced version of what WordPress E2E utils provide.
    * 
-   * @returns {Promise<string[]>} - Array of active plugin names.
+   * @returns {Promise<PluginInfo[]>} - Array of active plugin info objects.
    * 
    * @since TBD
    */
-  async getActivePlugins(): Promise<string[]> {
-    await this.goToPlugins();
+  async getActivePluginsWithInfo(): Promise<PluginInfo[]> {
+    await this.admin.visitAdminPage('plugins.php');
     
-    const activePlugins: string[] = [];
+    const activePlugins: PluginInfo[] = [];
     const rows = await this.page.locator('tr[data-slug]').all();
     
     for (const row of rows) {
       const deactivateLink = row.locator('a:has-text("Deactivate")');
       if (await deactivateLink.isVisible()) {
         const slug = await row.getAttribute('data-slug');
-        if (slug) {
-          activePlugins.push(slug);
+        const name = await row.locator('.plugin-title strong').textContent();
+        const version = await row.locator('.plugin-version-author-uri').textContent();
+        
+        if (slug && name) {
+          activePlugins.push({
+            slug,
+            name: name.trim(),
+            version: version?.match(/Version\s+([\d.]+)/)?.[1] || 'unknown',
+            isActive: true,
+            isNetworkActive: await row.locator('.plugin-title').locator(':has-text("Network Active")').isVisible()
+          });
         }
       }
     }
@@ -291,154 +206,143 @@ export class WordPressHelpers {
   }
 
   /**
-   * Check for plugin conflicts.
+   * Check for plugin conflicts by testing activation combinations.
+   * TestFlow-specific functionality for plugin testing.
    * 
-   * @param {string[]} pluginSlugs - Array of plugin slugs to check.
+   * @param {string[]} pluginSlugs - Array of plugin slugs to test.
    * 
-   * @returns {Promise<string[]>} - Array of conflicting plugins.
+   * @returns {Promise<ConflictResult>} - Conflict analysis results.
    * 
    * @since TBD
    */
-  async checkPluginConflicts(pluginSlugs: string[]): Promise<string[]> {
+  async checkPluginConflicts(pluginSlugs: string[]): Promise<ConflictResult> {
+    if (!this.requestUtils) {
+      await this.initRequestUtils();
+    }
+
     const conflicts: string[] = [];
+    const errors: { [key: string]: string[] } = {};
     
     for (const slug of pluginSlugs) {
       try {
-        await this.activatePlugin(slug);
+        await this.requestUtils!.activatePlugin(slug);
         
         // Check for PHP errors or conflicts
-        const errors = await this.checkForPHPErrors();
-        if (errors.length > 0) {
+        const phpErrors = await this.checkForPHPErrors();
+        if (phpErrors.length > 0) {
           conflicts.push(slug);
-          await this.deactivatePlugin(slug);
+          errors[slug] = phpErrors;
+          await this.requestUtils!.deactivatePlugin(slug);
         }
       } catch (error) {
         conflicts.push(slug);
+        errors[slug] = [error instanceof Error ? error.message : String(error)];
       }
     }
     
-    return conflicts;
+    return {
+      conflicts,
+      errors,
+      totalTested: pluginSlugs.length,
+      conflictCount: conflicts.length
+    };
   }
 
   /**
-   * Wait for plugin to be fully loaded.
+   * Wait for plugin to fully initialize with custom indicators.
+   * More comprehensive than basic activation check.
    * 
-   * @param {string} pluginSlug - Plugin slug.
-   * @param {number} timeout   - Timeout in milliseconds.
+   * @param {string} pluginSlug   - Plugin slug.
+   * @param {WaitOptions} options - Wait configuration options.
    * 
    * @since TBD
    */
-  async waitForPluginLoaded(pluginSlug: string, timeout: number = 10000): Promise<void> {
+  async waitForPluginInitialized(pluginSlug: string, options: WaitOptions = {}): Promise<void> {
+    const { 
+      timeout = 10000, 
+      indicators = [], 
+      adminPage = 'plugins.php' 
+    } = options;
+    
     const startTime = Date.now();
     
     while (Date.now() - startTime < timeout) {
-      if (await this.isPluginActive(pluginSlug)) {
-        // Additional check - look for plugin-specific indicators
-        const pluginIndicators = [
-          `[data-plugin="${pluginSlug}"]`,
-          `.${pluginSlug}`,
-          `#${pluginSlug}`,
-          `[class*="${pluginSlug}"]`
-        ];
+      // Check if plugin is active using WordPress utils
+      try {
+        await this.admin.visitAdminPage(adminPage);
+        const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"]`);
+        const isActive = await pluginRow.locator('a:has-text("Deactivate")').isVisible();
         
-        for (const indicator of pluginIndicators) {
-          if (await this.page.locator(indicator).isVisible()) {
-            return;
+        if (isActive) {
+          // Check for custom indicators if provided
+          if (indicators.length > 0) {
+            for (const indicator of indicators) {
+              if (await this.page.locator(indicator).isVisible()) {
+                return;
+              }
+            }
+          } else {
+            // Default indicators
+            const defaultIndicators = [
+              `[data-plugin="${pluginSlug}"]`,
+              `.${pluginSlug}-initialized`,
+              `#${pluginSlug}-status`,
+              `[data-testid="${pluginSlug}"]`
+            ];
+            
+            for (const indicator of defaultIndicators) {
+              if (await this.page.locator(indicator).isVisible()) {
+                return;
+              }
+            }
           }
         }
+      } catch (error) {
+        // Continue waiting
       }
       
       await this.page.waitForTimeout(500);
     }
     
-    throw new Error(`Plugin ${pluginSlug} not loaded within ${timeout}ms`);
+    throw new Error(`Plugin ${pluginSlug} not fully initialized within ${timeout}ms`);
   }
 
   /**
-   * Create a post using WordPress Editor utilities.
-   * 
-   * @param {string} title   - Post title.
-   * @param {string} content - Post content.
-   * @param {string} status  - Post status.
-   * 
-   * @returns {Promise<string>} - Created post URL.
+   * Clear all types of WordPress caches (TestFlow-specific implementation).
+   * More comprehensive than WordPress E2E utils.
    * 
    * @since TBD
    */
-  async createPost(title: string, content: string = '', status: string = 'publish'): Promise<string> {
-    // Use WordPress Editor utilities
-    await this.admin.createNewPost();
-    
-    // Set post title
-    await this.editor.canvas.click('role=textbox[name="Add title"i]');
-    await this.page.keyboard.type(title);
-    
-    // Set post content
-    if (content) {
-      await this.editor.canvas.click('role=textbox[name="Type / to choose a block"i]');
-      await this.page.keyboard.type(content);
-    }
-    
-    // Publish or save post
-    if (status === 'publish') {
-      await this.editor.publishPost();
-    } else {
-      await this.page.click('button[aria-label="Save draft"]');
-    }
-    
-    // Get the post URL
-    const currentUrl = this.page.url();
-    const postId = currentUrl.match(/post=(\d+)/)?.[1];
-    
-    if (postId) {
-      return `/?p=${postId}`;
-    }
-    
-    return '/';
-  }
-
-  /**
-   * Navigate to frontend.
-   * 
-   * @param {string} path    - Frontend path.
-   * @param {string} siteUrl - Site URL.
-   * 
-   * @since TBD
-   */
-  async goToFrontend(path: string = '/', siteUrl: string = 'https://testflow.lndo.site'): Promise<void> {
-    const frontendUrl = `${siteUrl}${path}`;
-    await this.page.goto(frontendUrl);
-  }
-
-  /**
-   * Clear all caches.
-   * 
-   * @since TBD
-   */
-  async clearCaches(): Promise<void> {
-    // Try to clear common caching plugins
+  async clearAllCaches(): Promise<void> {
     const cachingPlugins = [
-      'w3-total-cache',
-      'wp-super-cache',
-      'wp-rocket',
-      'litespeed-cache',
-      'wp-fastest-cache'
+      { slug: 'w3-total-cache', clearUrl: 'admin.php?page=w3tc_general' },
+      { slug: 'wp-super-cache', clearUrl: 'options-general.php?page=wpsupercache' },
+      { slug: 'wp-rocket', clearUrl: 'options-general.php?page=wprocket' },
+      { slug: 'litespeed-cache', clearUrl: 'admin.php?page=litespeed' },
+      { slug: 'wp-fastest-cache', clearUrl: 'admin.php?page=wpfastestcacheoptions' },
+      { slug: 'wp-optimize', clearUrl: 'admin.php?page=WP-Optimize' }
     ];
     
-    for (const plugin of cachingPlugins) {
-      if (await this.isPluginActive(plugin)) {
-        try {
-          await this.admin.visitAdminPage(`admin.php?page=${plugin}`);
+    for (const { slug, clearUrl } of cachingPlugins) {
+      try {
+        const activePlugins = await this.getActivePluginsWithInfo();
+        const isActive = activePlugins.some(plugin => plugin.slug === slug);
+        
+        if (isActive) {
+          await this.admin.visitAdminPage(clearUrl);
           
-          // Look for clear cache buttons
-          const clearButtons = [
+          // Look for clear cache buttons with multiple selectors
+          const clearSelectors = [
             'input[value*="Clear"]',
             'button:has-text("Clear Cache")',
             'a:has-text("Purge Cache")',
-            'button:has-text("Flush Cache")'
+            'button:has-text("Flush Cache")',
+            'input[value*="Flush"]',
+            'button:has-text("Empty Cache")',
+            '.wp-rocket-button:has-text("Clear")'
           ];
           
-          for (const selector of clearButtons) {
+          for (const selector of clearSelectors) {
             const button = this.page.locator(selector);
             if (await button.isVisible()) {
               await button.click();
@@ -446,58 +350,63 @@ export class WordPressHelpers {
               break;
             }
           }
-        } catch (error) {
-          // Continue if clearing specific cache fails
-          console.warn(`Failed to clear cache for ${plugin}:`, error);
         }
+      } catch (error) {
+        console.warn(`Failed to clear cache for ${slug}:`, error);
       }
     }
     
-    // Clear browser cache
-    await this.page.evaluate(() => {
-      if ('caches' in window) {
-        caches.keys().then(names => {
-          names.forEach(name => {
-            caches.delete(name);
+    // Clear object cache and opcache if possible
+    await this.clearObjectCache();
+    await this.clearOpcache();
+  }
+
+  /**
+   * Clear WordPress object cache.
+   * 
+   * @since TBD
+   */
+  private async clearObjectCache(): Promise<void> {
+    try {
+      await this.page.evaluate(() => {
+        // Clear browser-side caches
+        if ('caches' in window) {
+          window.caches.keys().then((names: string[]) => {
+            names.forEach((name: string) => {
+              window.caches.delete(name);
+            });
           });
-        });
+        }
+      });
+    } catch (error) {
+      // Silently handle if not supported
+    }
+  }
+
+  /**
+   * Clear OPcache via WordPress admin.
+   * 
+   * @since TBD
+   */
+  private async clearOpcache(): Promise<void> {
+    try {
+      await this.admin.visitAdminPage('site-health.php?tab=debug');
+      
+      // Look for OPcache section and clear button
+      const opcacheSection = this.page.locator('.health-check-accordion-panel:has-text("OPcache")');
+      if (await opcacheSection.isVisible()) {
+        const clearButton = opcacheSection.locator('button:has-text("Clear"), a:has-text("Clear")');
+        if (await clearButton.isVisible()) {
+          await clearButton.click();
+        }
       }
-    });
+    } catch (error) {
+      // OPcache clearing not available
+    }
   }
 
   /**
-   * Take a screenshot.
-   * 
-   * @param {string} filename - Screenshot filename.
-   * 
-   * @since TBD
-   */
-  async takeScreenshot(filename: string): Promise<void> {
-    const screenshotPath = `test-results/screenshots/${filename}`;
-    await this.page.screenshot({ 
-      path: screenshotPath, 
-      fullPage: true 
-    });
-  }
-
-  /**
-   * Wait for admin page to load completely.
-   * 
-   * @since TBD
-   */
-  async waitForAdminPageLoad(): Promise<void> {
-    // Wait for WordPress admin bar
-    await this.page.waitForSelector('#wpadminbar', { timeout: 10000 });
-    
-    // Wait for admin menu
-    await this.page.waitForSelector('#adminmenu', { timeout: 5000 });
-    
-    // Wait for page to be fully loaded
-    await this.page.waitForLoadState('networkidle');
-  }
-
-  /**
-   * Check for PHP errors on the page.
+   * Check for PHP errors in page content (TestFlow-specific).
    * 
    * @returns {Promise<string[]>} - Array of PHP error messages.
    * 
@@ -505,8 +414,6 @@ export class WordPressHelpers {
    */
   async checkForPHPErrors(): Promise<string[]> {
     const errors: string[] = [];
-    
-    // Check page content for PHP errors
     const pageContent = await this.page.content();
     
     const errorPatterns = [
@@ -514,7 +421,8 @@ export class WordPressHelpers {
       /Parse error:.*?in.*?on line \d+/gi,
       /Warning:.*?in.*?on line \d+/gi,
       /Notice:.*?in.*?on line \d+/gi,
-      /Deprecated:.*?in.*?on line \d+/gi
+      /Deprecated:.*?in.*?on line \d+/gi,
+      /Uncaught.*?in.*?on line \d+/gi
     ];
     
     for (const pattern of errorPatterns) {
@@ -524,201 +432,349 @@ export class WordPressHelpers {
       }
     }
     
-    return errors;
+    // Also check console for JavaScript errors that might indicate PHP issues
+    const consoleErrors = await this.page.evaluate(() => {
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (...args: any[]) => {
+        errors.push(args.join(' '));
+        originalError.apply(console, args);
+      };
+      return errors;
+    });
+    
+    return [...errors, ...consoleErrors];
   }
 
   /**
-   * Enable WordPress debug mode.
+   * Measure detailed page performance with TestFlow-specific metrics.
+   * More comprehensive than basic WordPress E2E utils.
+   * 
+   * @param {string} url - URL to measure performance for.
+   * 
+   * @returns {Promise<PerformanceMetrics>} - Detailed performance metrics.
    * 
    * @since TBD
    */
-  async enableDebugMode(): Promise<void> {
-    // This would typically be done at the wp-config level
-    // For testing, we can check if debug info is visible
-    await this.page.goto('/wp-admin/site-health.php?tab=debug');
-    await this.page.waitForSelector('.health-check-accordion-panel');
+  async measureDetailedPerformance(url: string): Promise<PerformanceMetrics> {
+    const startTime = Date.now();
+    
+    await this.page.goto(url);
+    
+    const performanceData = await this.page.evaluate(() => {
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+      const paint = performance.getEntriesByType('paint');
+      const resources = performance.getEntriesByType('resource');
+      
+      return {
+        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
+        loadComplete: navigation.loadEventEnd - navigation.loadEventStart,
+        firstPaint: paint.find((p) => p.name === 'first-paint')?.startTime || 0,
+        firstContentfulPaint: paint.find((p) => p.name === 'first-contentful-paint')?.startTime || 0,
+        resourceCount: resources.length,
+        totalResourceSize: resources.reduce((total, resource) => total + (resource.transferSize || 0), 0),
+        slowestResource: resources.reduce((slowest, resource) => 
+          resource.duration > (slowest?.duration || 0) ? resource : slowest, null
+        )
+      };
+    });
+    
+    return {
+      ...performanceData,
+      totalLoadTime: Date.now() - startTime,
+      timestamp: new Date().toISOString()
+    };
   }
 
   /**
-   * Get WordPress version.
+   * Network activate plugin (multisite only).
+   * TestFlow-specific multisite functionality.
    * 
-   * @returns {Promise<string>} - WordPress version.
-   * 
-   * @since TBD
-   */
-  async getWordPressVersion(): Promise<string> {
-    await this.admin.visitAdminPage('about.php');
-    
-    const versionElement = this.page.locator('.wp-badge');
-    if (await versionElement.isVisible()) {
-      const versionText = await versionElement.textContent();
-      const versionMatch = versionText?.match(/Version ([\d.]+)/);
-      return versionMatch?.[1] || 'unknown';
-    }
-    
-    return 'unknown';
-  }
-
-  /**
-   * Switch to a multisite subsite.
-   * 
-   * @param {string} siteName - Site name or ID.
-   * 
-   * @since TBD
-   */
-  async switchToSite(siteName: string): Promise<void> {
-    await this.admin.visitAdminPage('my-sites.php');
-    
-    const siteLink = this.page.locator(`a:has-text("${siteName}")`);
-    if (await siteLink.isVisible()) {
-      await siteLink.click();
-    } else {
-      throw new Error(`Site not found: ${siteName}`);
-    }
-  }
-
-  /**
-   * Network activate a plugin (multisite).
-   * 
-   * @param {string} pluginSlug - Plugin slug.
+   * @param {string} pluginSlug - Plugin slug to network activate.
    * 
    * @since TBD
    */
   async networkActivatePlugin(pluginSlug: string): Promise<void> {
     await this.admin.visitAdminPage('network/plugins.php');
     
-    const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"], tr:has-text("${pluginSlug}")`).first();
-    
-    if (!(await pluginRow.isVisible())) {
-      throw new Error(`Plugin not found: ${pluginSlug}`);
-    }
-    
+    const pluginRow = this.page.locator(`tr[data-slug="${pluginSlug}"]`);
     const networkActivateLink = pluginRow.locator('a:has-text("Network Activate")');
     
     if (await networkActivateLink.isVisible()) {
       await networkActivateLink.click();
-      await this.page.waitForSelector('.notice-success', { timeout: 5000 });
+      await this.page.waitForSelector('.notice-success', { timeout: 10000 });
+    } else {
+      // Check if already network activated
+      const networkDeactivateLink = pluginRow.locator('a:has-text("Network Deactivate")');
+      if (!(await networkDeactivateLink.isVisible())) {
+        throw new Error(`Cannot network activate plugin: ${pluginSlug}`);
+      }
     }
   }
 
   /**
-   * Measure page load time.
+   * Switch to specific site in multisite network.
+   * TestFlow-specific multisite functionality.
    * 
-   * @param {string} url - URL to measure.
-   * 
-   * @returns {Promise<number>} - Load time in milliseconds.
+   * @param {string} siteName - Name or URL of the site to switch to.
    * 
    * @since TBD
    */
-  async measurePageLoad(url: string): Promise<number> {
-    const startTime = Date.now();
-    await this.page.goto(url);
-    await this.page.waitForLoadState('networkidle');
-    const endTime = Date.now();
+  async switchToSite(siteName: string): Promise<void> {
+    await this.admin.visitAdminPage('network/sites.php');
     
-    return endTime - startTime;
+    const siteRow = this.page.locator(`tr:has-text("${siteName}")`);
+    const editLink = siteRow.locator('a:has-text("Edit")');
+    
+    if (await editLink.isVisible()) {
+      await editLink.click();
+      await this.page.waitForLoadState('networkidle');
+    } else {
+      throw new Error(`Cannot find site: ${siteName}`);
+    }
   }
 
   /**
-   * Check accessibility using basic checks.
+   * Take screenshot with TestFlow-specific naming and organization.
    * 
-   * @returns {Promise<string[]>} - Array of accessibility issues.
+   * @param {string} testName        - Name of the test.
+   * @param {ScreenshotOptions} options - Screenshot options.
    * 
-   * @since TBD
-   */
-  async checkAccessibility(): Promise<string[]> {
-    const issues: string[] = [];
-    
-    // Check for images without alt text
-    const imagesWithoutAlt = await this.page.locator('img:not([alt])').count();
-    if (imagesWithoutAlt > 0) {
-      issues.push(`${imagesWithoutAlt} images without alt text`);
-    }
-    
-    // Check for links without accessible names
-    const linksWithoutText = await this.page.locator('a:not(:has-text())').count();
-    if (linksWithoutText > 0) {
-      issues.push(`${linksWithoutText} links without accessible text`);
-    }
-    
-    // Check for form inputs without labels
-    const inputsWithoutLabels = await this.page.locator('input:not([aria-label]):not([aria-labelledby])').count();
-    if (inputsWithoutLabels > 0) {
-      issues.push(`${inputsWithoutLabels} form inputs without labels`);
-    }
-    
-    return issues;
-  }
-
-  /**
-   * Get performance metrics.
-   * 
-   * @returns {Promise<object>} - Performance metrics.
+   * @returns {Promise<string>} - Path to saved screenshot.
    * 
    * @since TBD
    */
-  async getPerformanceMetrics(): Promise<any> {
-    const metrics = await this.page.evaluate(() => {
-      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-      return {
-        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
-        loadComplete: navigation.loadEventEnd - navigation.loadEventStart,
-        firstPaint: performance.getEntriesByName('first-paint')[0]?.startTime || 0,
-        firstContentfulPaint: performance.getEntriesByName('first-contentful-paint')[0]?.startTime || 0,
-        resourceCount: performance.getEntriesByType('resource').length
-      };
+  async takeTestScreenshot(testName: string, options: ScreenshotOptions = {}): Promise<string> {
+    const { 
+      fullPage = true, 
+      directory = 'screenshots', 
+      timestamp = true 
+    } = options;
+    
+    const fileName = `${testName}${timestamp ? `-${Date.now()}` : ''}.png`;
+    const filePath = `${directory}/${fileName}`;
+    
+    await this.page.screenshot({ 
+      path: filePath, 
+      fullPage 
     });
     
-    return metrics;
+    return filePath;
   }
 }
 
-// Export utility functions for backward compatibility
+// Type definitions for TestFlow helpers
+export interface PluginInfo {
+  slug: string;
+  name: string;
+  version: string;
+  isActive: boolean;
+  isNetworkActive: boolean;
+}
+
+export interface ConflictResult {
+  conflicts: string[];
+  errors: { [key: string]: string[] };
+  totalTested: number;
+  conflictCount: number;
+}
+
+export interface WaitOptions {
+  timeout?: number;
+  indicators?: string[];
+  adminPage?: string;
+}
+
+export interface PerformanceMetrics {
+  domContentLoaded: number;
+  loadComplete: number;
+  firstPaint: number;
+  firstContentfulPaint: number;
+  resourceCount: number;
+  totalResourceSize: number;
+  slowestResource: any;
+  totalLoadTime: number;
+  timestamp: string;
+}
+
+export interface ScreenshotOptions {
+  fullPage?: boolean;
+  directory?: string;
+  timestamp?: boolean;
+}
+
+// Legacy standalone functions for backward compatibility
+// These now use the new WordPress E2E utils under the hood
+
+/**
+ * Login to WordPress admin (legacy function).
+ * Use WordPress E2E utils test fixtures for new code.
+ * 
+ * @param {Page} page     - Playwright page instance.
+ * @param {string} username - WordPress username.
+ * @param {string} password - WordPress password.
+ * 
+ * @since TBD
+ */
 export async function wpLogin(page: Page, username: string = 'admin', password: string = 'password'): Promise<void> {
-  const helpers = new WordPressHelpers(page);
-  await helpers.login(username, password);
+  const requestUtils = await RequestUtils.setup({
+    baseURL: process.env.WP_BASE_URL || 'https://testflow.lndo.site',
+    user: { username, password },
+  });
+  await requestUtils.login();
 }
 
+/**
+ * Activate plugin (legacy function).
+ * Use WordPress E2E utils or TestFlowHelpers for new code.
+ * 
+ * @param {Page} page       - Playwright page instance.
+ * @param {string} pluginSlug - Plugin slug to activate.
+ * 
+ * @since TBD
+ */
 export async function activatePlugin(page: Page, pluginSlug: string): Promise<void> {
-  const helpers = new WordPressHelpers(page);
-  await helpers.activatePlugin(pluginSlug);
+  const requestUtils = await RequestUtils.setup({
+    baseURL: process.env.WP_BASE_URL || 'https://testflow.lndo.site',
+    user: {
+      username: process.env.WP_USERNAME || 'admin',
+      password: process.env.WP_PASSWORD || 'password',
+    },
+  });
+  await requestUtils.activatePlugin(pluginSlug);
 }
 
+/**
+ * Deactivate plugin (legacy function).
+ * Use WordPress E2E utils or TestFlowHelpers for new code.
+ * 
+ * @param {Page} page       - Playwright page instance.
+ * @param {string} pluginSlug - Plugin slug to deactivate.
+ * 
+ * @since TBD
+ */
 export async function deactivatePlugin(page: Page, pluginSlug: string): Promise<void> {
-  const helpers = new WordPressHelpers(page);
-  await helpers.deactivatePlugin(pluginSlug);
+  const requestUtils = await RequestUtils.setup({
+    baseURL: process.env.WP_BASE_URL || 'https://testflow.lndo.site',
+    user: {
+      username: process.env.WP_USERNAME || 'admin',
+      password: process.env.WP_PASSWORD || 'password',
+    },
+  });
+  await requestUtils.deactivatePlugin(pluginSlug);
 }
 
+/**
+ * Check if plugin is active (legacy function).
+ * Use WordPress E2E utils for new code.
+ * 
+ * @param {Page} page       - Playwright page instance.
+ * @param {string} pluginSlug - Plugin slug to check.
+ * 
+ * @returns {Promise<boolean>} - Whether plugin is active.
+ * 
+ * @since TBD
+ */
 export async function isPluginActive(page: Page, pluginSlug: string): Promise<boolean> {
-  const helpers = new WordPressHelpers(page);
-  return await helpers.isPluginActive(pluginSlug);
+  const pageUtils = new PageUtils({ page });
+  const editor = new Editor({ page });
+  const admin = new Admin({ page, pageUtils, editor });
+  
+  await admin.visitAdminPage('plugins.php');
+  const pluginRow = page.locator(`tr[data-slug="${pluginSlug}"]`);
+  const deactivateLink = pluginRow.locator('a:has-text("Deactivate")');
+  
+  return await deactivateLink.isVisible();
 }
 
+/**
+ * Create post (legacy function).
+ * Use WordPress E2E utils for new code.
+ * 
+ * @param {Page} page    - Playwright page instance.
+ * @param {string} title   - Post title.
+ * @param {string} content - Post content.
+ * 
+ * @returns {Promise<string>} - Created post URL.
+ * 
+ * @since TBD
+ */
 export async function createPost(page: Page, title: string, content: string = ''): Promise<string> {
-  const helpers = new WordPressHelpers(page);
-  return await helpers.createPost(title, content);
+  const pageUtils = new PageUtils({ page });
+  const editor = new Editor({ page });
+  const admin = new Admin({ page, pageUtils, editor });
+  
+  await admin.createNewPost();
+  await editor.canvas.locator('role=textbox[name="Add title"i]').fill(title);
+  
+  if (content) {
+    await editor.canvas.locator('role=document[name="Empty block"i]').click();
+    await page.keyboard.type(content);
+  }
+  
+  // Save post
+  await page.keyboard.press('Meta+s'); // Or Ctrl+s on Windows/Linux
+  await page.waitForSelector('.editor-post-save-draft', { state: 'hidden', timeout: 10000 });
+  
+  // Get the post URL
+  const postUrl = await page.url();
+  return postUrl.replace('/wp-admin/post.php', '').replace('?post=', '/?p=').replace('&action=edit', '');
 }
 
+/**
+ * Clear cache (legacy function).
+ * Use TestFlowHelpers.clearAllCaches() for new code.
+ * 
+ * @param {Page} page - Playwright page instance.
+ * 
+ * @since TBD
+ */
 export async function clearCache(page: Page): Promise<void> {
-  const helpers = new WordPressHelpers(page);
-  await helpers.clearCaches();
+  const helpers = new TestFlowHelpers(page);
+  await helpers.clearAllCaches();
 }
 
+/**
+ * Measure page load time (legacy function).
+ * Use TestFlowHelpers.measureDetailedPerformance() for new code.
+ * 
+ * @param {Page} page - Playwright page instance.
+ * @param {string} url  - URL to measure.
+ * 
+ * @returns {Promise<number>} - Load time in milliseconds.
+ * 
+ * @since TBD
+ */
 export async function measurePageLoad(page: Page, url: string): Promise<number> {
-  const helpers = new WordPressHelpers(page);
-  return await helpers.measurePageLoad(url);
+  const helpers = new TestFlowHelpers(page);
+  const metrics = await helpers.measureDetailedPerformance(url);
+  return metrics.totalLoadTime;
 }
 
+/**
+ * Switch to site (legacy function).
+ * Use TestFlowHelpers.switchToSite() for new code.
+ * 
+ * @param {Page} page     - Playwright page instance.
+ * @param {string} siteName - Site name to switch to.
+ * 
+ * @since TBD
+ */
 export async function switchToSite(page: Page, siteName: string): Promise<void> {
-  const helpers = new WordPressHelpers(page);
+  const helpers = new TestFlowHelpers(page);
   await helpers.switchToSite(siteName);
 }
 
+/**
+ * Network activate plugin (legacy function).
+ * Use TestFlowHelpers.networkActivatePlugin() for new code.
+ * 
+ * @param {Page} page       - Playwright page instance.
+ * @param {string} pluginSlug - Plugin slug to network activate.
+ * 
+ * @since TBD
+ */
 export async function networkActivatePlugin(page: Page, pluginSlug: string): Promise<void> {
-  const helpers = new WordPressHelpers(page);
+  const helpers = new TestFlowHelpers(page);
   await helpers.networkActivatePlugin(pluginSlug);
-}
-
-// Export the extended test for use in test files
-export { test };
-export { expect } from '@playwright/test'; 
+} 

@@ -2,18 +2,6 @@
 
 A comprehensive WordPress plugin testing framework built with Bun, Lando, and Playwright. TestFlow enables end-to-end testing of WordPress plugins across multiple environments and configurations.
 
-## 🌟 Key Features
-
-- **🔧 Multi-Environment Testing**: Test across different PHP, MySQL, and WordPress versions
-- **🧩 Smart Plugin Management**: Pre-activation, selective activation, and conflict resolution
-- **🎯 Multi-Configuration Support**: Different test profiles for various scenarios
-- **🚀 Fast Test Execution**: Parallel test execution with optimized performance
-- **📊 Comprehensive Reporting**: Detailed test results with performance metrics
-- **🔄 CI/CD Integration**: GitHub Actions workflows with matrix testing
-- **🌐 Cross-Browser Support**: Test across multiple browsers and devices
-- **⚡ Performance Testing**: Built-in performance monitoring and benchmarking
-- **🔒 Security Testing**: Automated security vulnerability scanning
-
 ## 📦 Installation
 
 ```bash
@@ -26,12 +14,15 @@ bun add -D testflow
 
 ### WordPress E2E Test Utils Integration
 
-TestFlow includes **official WordPress E2E test utilities** (`@wordpress/e2e-test-utils-playwright`) providing standardized, well-maintained helpers for WordPress testing:
+TestFlow seamlessly integrates with **official WordPress E2E test utilities** (`@wordpress/e2e-test-utils-playwright`) providing standardized, well-maintained helpers for WordPress testing:
 
 - **Admin utilities**: Navigate WordPress admin with `admin.visitAdminPage()`
 - **Editor utilities**: Interact with Gutenberg editor via `editor.canvas`
 - **Request utilities**: Fast plugin/theme activation with `requestUtils.activatePlugin()`
-- **Authentication**: Built-in WordPress login handling
+- **Page utilities**: Enhanced page interactions with `pageUtils`
+- **Authentication**: Built-in WordPress login handling with persistent storage state
+
+**Default URL**: All tests run on `https://testflow.lndo.site` (configurable via `WP_BASE_URL` environment variable)
 
 ## 🚀 Quick Start
 
@@ -81,6 +72,19 @@ test('Plugin settings page accessible', async ({ admin, page }) => {
   
   // Verify settings page loads
   await expect(page.locator('.wrap h1')).toContainText('My Plugin Settings');
+});
+
+test('TestFlow helpers for bulk operations', async ({ page, requestUtils }) => {
+  // Import TestFlow-specific helpers
+  const { TestFlowHelpers } = await import('testflow/helpers');
+  const helpers = new TestFlowHelpers(page);
+  
+  // Bulk activate multiple plugins efficiently
+  await helpers.bulkActivatePlugins(['plugin-a', 'plugin-b', 'plugin-c']);
+  
+  // Check for plugin conflicts
+  const conflicts = await helpers.checkPluginConflicts(['my-plugin', 'other-plugin']);
+  expect(conflicts.conflictCount).toBe(0);
 });
 ```
 
@@ -198,14 +202,16 @@ profiles:
 
 ## 🧪 WordPress E2E Test Utilities
 
-TestFlow integrates the **official WordPress E2E test utilities** for reliable, standardized testing:
+TestFlow seamlessly integrates the **official WordPress E2E test utilities** for reliable, standardized testing:
+
+> 📚 **[Complete WordPress Helpers Documentation](docs/wordpress-helpers.md)** - Comprehensive guide with examples, best practices, and migration instructions.
 
 ### Admin Navigation
 
 ```javascript
 import { test, expect } from '@wordpress/e2e-test-utils-playwright';
 
-test('Admin navigation', async ({ admin, page }) => {
+test('Admin navigation', async ({ admin, page, pageUtils }) => {
   // Navigate to any admin page
   await admin.visitAdminPage('plugins.php');
   await admin.visitAdminPage('themes.php');
@@ -214,6 +220,9 @@ test('Admin navigation', async ({ admin, page }) => {
   // Create posts/pages
   await admin.createNewPost();
   await admin.createNewPage({ title: 'Test Page' });
+  
+  // Use page utilities for enhanced interactions
+  await pageUtils.pressKeys('primary+a'); // Select all
 });
 ```
 
@@ -249,6 +258,26 @@ test('Fast plugin operations', async ({ requestUtils }) => {
     content: 'This is a test post',
     status: 'publish'
   });
+});
+
+test('TestFlow enhanced operations', async ({ page }) => {
+  // Import TestFlow helpers for advanced operations
+  const { TestFlowHelpers } = await import('testflow/helpers');
+  const helpers = new TestFlowHelpers(page);
+  
+  // Initialize request utils for API operations
+  await helpers.initRequestUtils();
+  
+  // Advanced plugin management
+  const activePlugins = await helpers.getActivePluginsWithInfo();
+  console.log('Active plugins:', activePlugins);
+  
+  // Clear all caches comprehensively
+  await helpers.clearAllCaches();
+  
+  // Performance measurement
+  const metrics = await helpers.measureDetailedPerformance('https://testflow.lndo.site');
+  expect(metrics.totalLoadTime).toBeLessThan(3000);
 });
 ```
 
@@ -297,12 +326,13 @@ plugins:
 
 ### Plugin Helpers
 
-TestFlow provides utilities for plugin management in tests:
+TestFlow provides both legacy helpers and enhanced utilities for plugin management:
 
 ```javascript
+// Legacy helpers (backward compatible)
 const { activatePlugin, deactivatePlugin, isPluginActive } = require('testflow/helpers');
 
-test('Plugin activation test', async ({ page }) => {
+test('Legacy plugin activation test', async ({ page }) => {
   // Check if plugin is active
   const isActive = await isPluginActive(page, 'my-plugin');
   expect(isActive).toBe(true);
@@ -312,6 +342,35 @@ test('Plugin activation test', async ({ page }) => {
   
   // Reactivate plugin
   await activatePlugin(page, 'my-plugin');
+});
+
+// Enhanced TestFlow helpers (recommended for new code)
+import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+import { TestFlowHelpers } from 'testflow/helpers';
+
+test('Enhanced plugin management', async ({ page, requestUtils }) => {
+  const helpers = new TestFlowHelpers(page);
+  
+  // Bulk operations
+  await helpers.bulkActivatePlugins(['plugin-a', 'plugin-b', 'plugin-c']);
+  await helpers.bulkDeactivatePlugins(['old-plugin']);
+  
+  // Wait for plugin initialization with custom indicators
+  await helpers.waitForPluginInitialized('my-plugin', {
+    timeout: 15000,
+    indicators: ['[data-plugin-ready="my-plugin"]'],
+    adminPage: 'plugins.php'
+  });
+  
+  // Advanced plugin conflict detection
+  const conflicts = await helpers.checkPluginConflicts(['plugin-a', 'plugin-b']);
+  if (conflicts.conflictCount > 0) {
+    console.warn('Plugin conflicts detected:', conflicts.errors);
+  }
+  
+  // Multisite operations
+  await helpers.networkActivatePlugin('my-plugin');
+  await helpers.switchToSite('subsite.example.com');
 });
 ```
 
@@ -438,14 +497,14 @@ test.describe('Performance Tests', () => {
   test('Homepage loads within acceptable time', async ({ page }) => {
     await clearCache(page);
     
-    const loadTime = await measurePageLoad(page, '/');
+    const loadTime = await measurePageLoad(page, 'https://testflow.lndo.site/');
     expect(loadTime).toBeLessThan(2000); // Less than 2 seconds
   });
   
   test('Admin dashboard performance', async ({ page }) => {
     await wpLogin(page);
     
-    const loadTime = await measurePageLoad(page, '/wp-admin/');
+    const loadTime = await measurePageLoad(page, 'https://testflow.lndo.site/wp-admin/');
     expect(loadTime).toBeLessThan(3000); // Less than 3 seconds
   });
 });
@@ -464,12 +523,12 @@ test.describe('Multisite Tests', () => {
     await networkActivatePlugin(page, 'my-plugin');
     
     // Test on main site
-    await page.goto('/');
+    await page.goto('https://testflow.lndo.site/');
     await expect(page.locator('[data-plugin="my-plugin"]')).toBeVisible();
     
     // Test on subsite
     await switchToSite(page, 'subsite');
-    await page.goto('/subsite/');
+    await page.goto('https://testflow.lndo.site/subsite/');
     await expect(page.locator('[data-plugin="my-plugin"]')).toBeVisible();
   });
 });
@@ -590,7 +649,7 @@ playwright:
     ['json', { outputFile: 'test-results.json' }]
   ]
   use:
-    baseURL: 'http://localhost'
+    baseURL: 'https://testflow.lndo.site'
     trace: 'on-first-retry'
     screenshot: 'only-on-failure'
     video: 'retain-on-failure'
@@ -607,6 +666,12 @@ playwright:
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📚 Documentation
+
+- **[WordPress Helpers Guide](docs/wordpress-helpers.md)**: Comprehensive guide to WordPress testing utilities
+- **[Configuration Reference](docs/configuration.md)**: Detailed testflow.yaml configuration options
+- **[Migration Guide](docs/migration.md)**: Upgrading from legacy helpers to modern WordPress E2E utils
 
 ## 🆘 Support
 
