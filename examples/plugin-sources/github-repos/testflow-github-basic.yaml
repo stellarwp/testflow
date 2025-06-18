@@ -1,0 +1,59 @@
+name: "GitHub Repository Plugin Testing"
+description: "Test WordPress plugins from public GitHub repositories"
+
+wordpress:
+  version: "6.4"
+  multisite: false
+  
+php:
+  version: "8.1"
+
+plugins:
+  # Public repository - latest release
+  - name: "query-monitor"
+    source: "github"
+    repository: "johnbillion/query-monitor"
+    type: "release" # Downloads latest release
+    
+  # Public repository - specific branch
+  - name: "debug-bar"
+    source: "github"
+    repository: "WordPress/debug-bar"
+    type: "branch"
+    branch: "trunk"
+    
+  # Public repository - specific tag
+  - name: "wp-crontrol"
+    source: "github"
+    repository: "johnbillion/wp-crontrol"
+    type: "tag"
+    tag: "v1.15.3"
+    
+  # Public repository - specific commit
+  - name: "user-switching"
+    source: "github"
+    repository: "johnbillion/user-switching"
+    type: "commit"
+    commit: "abc123def456"
+
+database:
+  name: "github_plugin_test"
+  
+tests:
+  - "tests/e2e/github-plugins.test.js"
+  - "tests/e2e/plugin-activation.test.js"
+
+environment:
+  WP_DEBUG: true
+  WP_DEBUG_LOG: true
+  WP_DEBUG_DISPLAY: false
+
+performance:
+  enabled: true
+  thresholds:
+    page_load: 3000
+    memory_usage: "256M"
+    
+cleanup:
+  after_test: true
+  keep_screenshots: true 

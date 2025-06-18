@@ -1,0 +1,106 @@
+name: "Multi-Plugin Local Development"
+description: "Test multiple local plugins together for integration testing"
+
+wordpress:
+  version: "6.4"
+  multisite: false
+  
+php:
+  version: "8.1"
+
+plugins:
+  # Core plugin being developed
+  - name: "core-plugin"
+    source: "local"
+    path: "./plugins/core"
+    type: "development"
+    priority: 1 # Load first
+    
+  # Extension plugin that depends on core
+  - name: "extension-plugin"
+    source: "local"
+    path: "./plugins/extension"
+    type: "development"
+    priority: 2
+    dependencies: ["core-plugin"]
+    
+  # Third-party plugin for compatibility testing
+  - name: "woocommerce"
+    source: "wordpress-org"
+    version: "latest"
+    
+  # Another local plugin with build process
+  - name: "utility-plugin"
+    source: "local"
+    path: "./plugins/utilities"
+    type: "built"
+    build_command: "composer install && npm run build"
+    
+  # Local plugin with custom build steps
+  - name: "complex-plugin"
+    source: "local"
+    path: "./plugins/complex"
+    type: "built"
+    build:
+      commands:
+        - "npm ci"
+        - "npm run build:production"
+        - "composer install --no-dev --optimize-autoloader"
+      output_dir: "./dist"
+
+database:
+  name: "multi_plugin_dev"
+  
+tests:
+  - "tests/e2e/plugin-interactions.test.js"
+  - "tests/e2e/compatibility.test.js"
+  - "tests/e2e/dependency-resolution.test.js"
+
+# Test different plugin combinations
+matrix:
+  plugin_combinations:
+    - ["core-plugin"]
+    - ["core-plugin", "extension-plugin"]
+    - ["core-plugin", "extension-plugin", "woocommerce"]
+    - ["core-plugin", "utility-plugin"]
+    - ["core-plugin", "extension-plugin", "utility-plugin", "complex-plugin"]
+
+# Watch for changes in all plugin directories
+watch:
+  enabled: true
+  paths:
+    - "./plugins/*/src/**/*.php"
+    - "./plugins/*/src/**/*.js"
+    - "./plugins/*/src/**/*.css"
+    - "./plugins/*/assets/**/*"
+  debounce: 1500 # ms
+  ignore:
+    - "./plugins/*/node_modules/**"
+    - "./plugins/*/vendor/**"
+    - "./plugins/*/dist/**"
+    - "./plugins/*/build/**"
+
+environment:
+  WP_DEBUG: true
+  WP_DEBUG_LOG: true
+  PLUGIN_DEV_MODE: true
+  MULTI_PLUGIN_TESTING: true
+
+# Development server for hot reloading
+dev_server:
+  enabled: true
+  port: 3000
+  hot_reload: true
+  watch_extensions: [".php", ".js", ".css", ".scss"]
+
+performance:
+  enabled: true
+  thresholds:
+    page_load: 4000 # Higher threshold for multiple plugins
+    memory_usage: "512M"
+    database_queries: 100
+    
+cleanup:
+  after_test: true
+  keep_screenshots: true
+  preserve_logs: true 

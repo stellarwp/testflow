@@ -1,0 +1,65 @@
+name: "Local Plugin Development Testing"
+description: "Test WordPress plugin from local development environment"
+
+wordpress:
+  version: "6.4"
+  multisite: false
+  
+php:
+  version: "8.1"
+
+plugins:
+  # Local plugin from current directory
+  - name: "my-plugin"
+    source: "local"
+    path: "./src"
+    type: "development" # Raw source files
+    
+  # Local plugin with build process
+  - name: "advanced-plugin"
+    source: "local"
+    path: "./plugins/advanced-plugin"
+    type: "built"
+    build_command: "npm run build && composer install --no-dev"
+    
+  # Symlinked plugin for shared development
+  - name: "shared-plugin"
+    source: "local"
+    path: "/path/to/shared/plugin"
+    type: "symlink"
+
+database:
+  name: "local_dev_test"
+  
+tests:
+  - "tests/e2e/local-development.test.js"
+  - "tests/e2e/plugin-functionality.test.js"
+
+# Watch for file changes and re-run tests
+watch:
+  enabled: true
+  paths:
+    - "./src/**/*.php"
+    - "./src/**/*.js"
+    - "./src/**/*.css"
+  debounce: 1000 # ms
+  ignore:
+    - "./node_modules/**"
+    - "./vendor/**"
+
+environment:
+  WP_DEBUG: true
+  WP_DEBUG_LOG: true
+  WP_DEBUG_DISPLAY: true
+  SCRIPT_DEBUG: true
+  PLUGIN_DEV_MODE: true
+
+performance:
+  enabled: true
+  thresholds:
+    page_load: 3000
+    memory_usage: "256M"
+    
+cleanup:
+  after_test: true
+  keep_screenshots: true 

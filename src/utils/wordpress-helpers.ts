@@ -370,10 +370,10 @@ export class TestFlowHelpers {
     try {
       await this.page.evaluate(() => {
         // Clear browser-side caches
-        if ('caches' in window) {
-          window.caches.keys().then((names: string[]) => {
+        if ('caches' in globalThis) {
+          (globalThis as any).caches.keys().then((names: string[]) => {
             names.forEach((name: string) => {
-              window.caches.delete(name);
+              (globalThis as any).caches.delete(name);
             });
           });
         }
@@ -462,18 +462,18 @@ export class TestFlowHelpers {
     await this.page.goto(url);
     
     const performanceData = await this.page.evaluate(() => {
-      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-      const paint = performance.getEntriesByType('paint');
-      const resources = performance.getEntriesByType('resource');
+      const navigation = performance.getEntriesByType('navigation')[0] as any;
+      const paint = performance.getEntriesByType('paint') as any[];
+      const resources = performance.getEntriesByType('resource') as any[];
       
       return {
-        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
-        loadComplete: navigation.loadEventEnd - navigation.loadEventStart,
-        firstPaint: paint.find((p) => p.name === 'first-paint')?.startTime || 0,
-        firstContentfulPaint: paint.find((p) => p.name === 'first-contentful-paint')?.startTime || 0,
+        domContentLoaded: navigation?.domContentLoadedEventEnd - navigation?.domContentLoadedEventStart || 0,
+        loadComplete: navigation?.loadEventEnd - navigation?.loadEventStart || 0,
+        firstPaint: paint.find((p: any) => p.name === 'first-paint')?.startTime || 0,
+        firstContentfulPaint: paint.find((p: any) => p.name === 'first-contentful-paint')?.startTime || 0,
         resourceCount: resources.length,
-        totalResourceSize: resources.reduce((total, resource) => total + (resource.transferSize || 0), 0),
-        slowestResource: resources.reduce((slowest, resource) => 
+        totalResourceSize: resources.reduce((total: number, resource: any) => total + (resource.transferSize || 0), 0),
+        slowestResource: resources.reduce((slowest: any, resource: any) => 
           resource.duration > (slowest?.duration || 0) ? resource : slowest, null
         )
       };
@@ -687,7 +687,7 @@ export async function isPluginActive(page: Page, pluginSlug: string): Promise<bo
   return await deactivateLink.isVisible();
 }
 
-/**
+/**w
  * Create post (legacy function).
  * Use WordPress E2E utils for new code.
  * 

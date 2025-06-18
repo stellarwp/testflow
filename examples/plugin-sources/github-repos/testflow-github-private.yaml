@@ -1,0 +1,80 @@
+name: "Private GitHub Repository Testing"
+description: "Test WordPress plugins from private GitHub repositories with authentication"
+
+wordpress:
+  version: "6.4"
+  multisite: false
+  
+php:
+  version: "8.1"
+
+plugins:
+  # Private repository with token authentication
+  - name: "company-plugin"
+    source: "github"
+    repository: "company/private-wordpress-plugin"
+    type: "branch"
+    branch: "develop"
+    auth:
+      token: "${GITHUB_TOKEN}"
+      
+  # Private repository with specific commit
+  - name: "internal-tools"
+    source: "github"
+    repository: "organization/internal-wp-tools"
+    type: "commit"
+    commit: "abc123def456789"
+    auth:
+      token: "${GITHUB_PRIVATE_TOKEN}"
+      
+  # Fork testing with authentication
+  - name: "forked-plugin"
+    source: "github"
+    repository: "username/forked-plugin"
+    type: "branch"
+    branch: "feature/new-functionality"
+    auth:
+      token: "${GITHUB_FORK_TOKEN}"
+      
+  # Private repository - latest release
+  - name: "premium-plugin"
+    source: "github"
+    repository: "company/premium-wordpress-plugin"
+    type: "release"
+    auth:
+      token: "${GITHUB_TOKEN}"
+
+database:
+  name: "private_github_test"
+  
+tests:
+  - "tests/e2e/private-plugins.test.js"
+  - "tests/e2e/authentication.test.js"
+
+environment:
+  WP_DEBUG: true
+  WP_DEBUG_LOG: true
+  WP_DEBUG_DISPLAY: false
+  GITHUB_TOKEN: "${GITHUB_TOKEN}"
+  GITHUB_PRIVATE_TOKEN: "${GITHUB_PRIVATE_TOKEN}"
+  GITHUB_FORK_TOKEN: "${GITHUB_FORK_TOKEN}"
+
+security:
+  # Scan for exposed secrets
+  secret_scanning: true
+  # Clean up tokens from logs
+  sanitize_logs: true
+  # Validate repository access
+  verify_access: true
+
+performance:
+  enabled: true
+  thresholds:
+    page_load: 3000
+    memory_usage: "256M"
+    
+cleanup:
+  after_test: true
+  keep_screenshots: true
+  # Remove sensitive data
+  sanitize_artifacts: true 

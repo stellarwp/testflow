@@ -1,0 +1,247 @@
+name: GitHub Repository Plugin Testing
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *' # Daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of GitHub testing to run'
+        required: true
+        default: 'public'
+        type: choice
+        options:
+          - public
+          - private
+          - mixed
+      repository:
+        description: 'Specific repository to test (optional)'
+        required: false
+        type: string
+
+jobs:
+  test-github-plugins:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        wordpress: ['6.3', '6.4']
+        php: ['8.0', '8.1', '8.2']
+        test-type: 
+          - ${{ github.event.inputs.test_type || 'public' }}
+        
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+          
+      - name: Install TestFlow
+        run: bun add @your-org/testflow
+        
+      - name: Validate GitHub Token Access
+        if: matrix.test-type != 'public'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PRIVATE_TOKEN: ${{ secrets.GITHUB_PRIVATE_TOKEN }}
+        run: |
+          if [ -z "$GITHUB_TOKEN" ] && [ "${{ matrix.test-type }}" != "public" ]; then
+            echo "Error: GITHUB_TOKEN is required for private repository testing"
+            exit 1
+          fi
+          
+          # Test token access
+          if [ -n "$GITHUB_TOKEN" ]; then
+            curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+          fi
+        
+      - name: Configure Environment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PRIVATE_TOKEN: ${{ secrets.GITHUB_PRIVATE_TOKEN }}
+          GITHUB_FORK_TOKEN: ${{ secrets.GITHUB_FORK_TOKEN }}
+        run: |
+          echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> $GITHUB_ENV
+          echo "GITHUB_PRIVATE_TOKEN=${GITHUB_PRIVATE_TOKEN}" >> $GITHUB_ENV
+          echo "GITHUB_FORK_TOKEN=${GITHUB_FORK_TOKEN}" >> $GITHUB_ENV
+          echo "MATRIX_WORDPRESS=${{ matrix.wordpress }}" >> $GITHUB_ENV
+          echo "MATRIX_PHP=${{ matrix.php }}" >> $GITHUB_ENV
+          
+      - name: Setup Test Environment
+        run: |
+          # Create test directories
+          mkdir -p test-results screenshots
+          
+          # Set up Docker for Lando
+          docker --version
+          
+      - name: Run Public Repository Tests
+        if: matrix.test-type == 'public'
+        run: |
+          echo "Running public GitHub repository tests..."
+          bun testflow run testflow-github-basic.yaml
+        env:
+          WP_VERSION: ${{ matrix.wordpress }}
+          PHP_VERSION: ${{ matrix.php }}
+          
+      - name: Run Private Repository Tests
+        if: matrix.test-type == 'private'
+        run: |
+          echo "Running private GitHub repository tests..."
+          bun testflow run testflow-github-private.yaml
+        env:
+          WP_VERSION: ${{ matrix.wordpress }}
+          PHP_VERSION: ${{ matrix.php }}
+          
+      - name: Run Mixed Repository Tests
+        if: matrix.test-type == 'mixed'
+        run: |
+          echo "Running mixed GitHub repository tests..."
+          bun testflow run testflow-github-basic.yaml
+          bun testflow run testflow-github-private.yaml
+        env:
+          WP_VERSION: ${{ matrix.wordpress }}
+          PHP_VERSION: ${{ matrix.php }}
+          
+      - name: Test Specific Repository
+        if: github.event.inputs.repository != ''
+        run: |
+          echo "Testing specific repository: ${{ github.event.inputs.repository }}"
+          bun testflow test-single-repo --repository="${{ github.event.inputs.repository }}"
+          
+      - name: Security Scan
+        if: matrix.test-type != 'public'
+        run: |
+          echo "Running security scan for sensitive data..."
+          
+          # Scan test results for exposed tokens
+          if find test-results -name "*.log" -o -name "*.json" | xargs grep -l "ghp_\|github_pat_" 2>/dev/null; then
+            echo "Warning: Potential GitHub tokens found in test results"
+            # Sanitize the files
+            find test-results -name "*.log" -o -name "*.json" | xargs sed -i 's/ghp_[a-zA-Z0-9_]*/[REDACTED_TOKEN]/g'
+            find test-results -name "*.log" -o -name "*.json" | xargs sed -i 's/github_pat_[a-zA-Z0-9_]*/[REDACTED_TOKEN]/g'
+          fi
+          
+      - name: Generate Test Report
+        if: always()
+        run: |
+          echo "Generating test report..."
+          bun testflow report --format=json --output=test-results/github-report.json
+          bun testflow report --format=html --output=test-results/github-report.html
+          
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: github-test-results-${{ matrix.test-type }}-wp${{ matrix.wordpress }}-php${{ matrix.php }}
+          path: |
+            test-results/
+            screenshots/
+          retention-days: 30
+          
+      - name: Upload Security Scan Results
+        uses: actions/upload-artifact@v4
+        if: always() && matrix.test-type != 'public'
+        with:
+          name: security-scan-${{ matrix.test-type }}-wp${{ matrix.wordpress }}-php${{ matrix.php }}
+          path: |
+            security-scan-results/
+          retention-days: 7
+          
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'test-results/github-report.json';
+            
+            if (fs.existsSync(path)) {
+              const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+              const comment = `
+              ## GitHub Repository Plugin Test Results
+              
+              **Test Type:** ${{ matrix.test-type }}
+              **WordPress:** ${{ matrix.wordpress }}
+              **PHP:** ${{ matrix.php }}
+              
+              **Results:**
+              - Total Tests: ${report.total || 0}
+              - Passed: ${report.passed || 0}
+              - Failed: ${report.failed || 0}
+              - Skipped: ${report.skipped || 0}
+              
+              **Repository Tests:**
+              ${report.repositories ? report.repositories.map(repo => 
+                `- ${repo.name}: ${repo.status}`
+              ).join('\n') : 'No repository details available'}
+              
+              [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              `;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+            
+      - name: Cleanup Sensitive Data
+        if: always()
+        run: |
+          # Remove any potential sensitive data from logs
+          find . -name "*.log" -exec sed -i 's/ghp_[a-zA-Z0-9_]*/[REDACTED]/g' {} \;
+          find . -name "*.log" -exec sed -i 's/github_pat_[a-zA-Z0-9_]*/[REDACTED]/g' {} \;
+          
+          # Clear environment variables
+          unset GITHUB_TOKEN
+          unset GITHUB_PRIVATE_TOKEN
+          unset GITHUB_FORK_TOKEN
+
+  performance-analysis:
+    runs-on: ubuntu-latest
+    needs: test-github-plugins
+    if: always()
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Download Test Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: github-test-results-*
+          merge-multiple: true
+          
+      - name: Analyze Performance
+        run: |
+          echo "Analyzing GitHub repository plugin performance..."
+          
+          # Combine all test results
+          find . -name "github-report.json" -exec cat {} \; | jq -s '.' > combined-results.json
+          
+          # Generate performance report
+          echo "## GitHub Repository Performance Analysis" > performance-report.md
+          echo "" >> performance-report.md
+          
+          # Extract performance metrics
+          if [ -f combined-results.json ]; then
+            echo "Performance metrics extracted from test results" >> performance-report.md
+          fi
+          
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-performance-analysis
+          path: |
+            performance-report.md
+            combined-results.json 

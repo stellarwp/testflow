@@ -27,21 +27,25 @@ When testing private plugins or using authenticated sources:
 - Testing popular public plugins from WordPress.org
 - Automatic plugin download and installation
 - Version-specific testing
+- Performance benchmarking and compatibility testing
 
 ### 2. [Private Plugin URLs](private-urls/)
 - Testing plugins from private/authenticated URLs
 - Using GitHub Secrets for URL obfuscation
 - Authentication headers and tokens
+- Environment separation (staging/production)
 
-### 3. [Mixed Sources](mixed-sources/)
-- Combining public and private plugins in one test suite
-- Complex dependency scenarios
-- Environment-specific configurations
+### 3. [GitHub Repositories](github-repos/)
+- Testing plugins directly from GitHub repositories
+- Public and private repository support
+- Branch, tag, and commit-specific testing
+- GitHub token authentication for private repos
 
-### 4. [GitHub Releases](github-releases/)
-- Testing plugins distributed via GitHub releases
-- Using GitHub tokens for private repositories
-- Version pinning and latest release testing
+### 4. [Local Development](local-development/)
+- Testing plugins from local development environments
+- Hot reloading and file watching
+- Build process integration
+- Multi-plugin development and testing
 
 ## Quick Start
 
