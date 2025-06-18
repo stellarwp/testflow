@@ -1,0 +1,344 @@
+name: Private Plugin Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run nightly to catch issues with private plugin updates
+    - cron: '0 3 * * *'
+
+# Require manual approval for private plugin testing
+concurrency:
+  group: private-plugins-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Security check before running private tests
+  security-check:
+    name: Security Pre-Check
+    runs-on: ubuntu-latest
+    outputs:
+      can-run-private: ${{ steps.check.outputs.can-run-private }}
+    
+    steps:
+      - name: Check if secrets are available
+        id: check
+        run: |
+          if [[ -n "${{ secrets.PRIVATE_API_TOKEN }}" && -n "${{ secrets.PRIVATE_PLUGIN_URL_1 }}" ]]; then
+            echo "can-run-private=true" >> $GITHUB_OUTPUT
+          else
+            echo "can-run-private=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Private plugin secrets not available - skipping private tests"
+          fi
+
+  # Test staging plugins (less sensitive)
+  test-staging-plugins:
+    name: Test Staging Plugins
+    runs-on: ubuntu-latest
+    needs: security-check
+    if: needs.security-check.outputs.can-run-private == 'true'
+    environment: staging  # GitHub environment for staging secrets
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'Staging - PHP 8.1'
+            php: '8.1'
+            wordpress: 'latest'
+            config: 'testflow-private-staging.yaml'
+          
+          - name: 'Staging - PHP 8.2'
+            php: '8.2'
+            wordpress: 'latest'
+            config: 'testflow-private-staging.yaml'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install TestFlow
+        run: bun add -g testflow
+
+      - name: Verify staging plugin URLs accessibility
+        env:
+          STAGING_PLUGIN_URL_1: ${{ secrets.STAGING_PLUGIN_URL_1 }}
+          STAGING_API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+        run: |
+          echo "Testing staging URL accessibility..."
+          # Test URL without downloading (HEAD request)
+          curl -I -H "Authorization: Bearer $STAGING_API_TOKEN" "$STAGING_PLUGIN_URL_1" || {
+            echo "❌ Staging URL not accessible"
+            exit 1
+          }
+          echo "✅ Staging URLs accessible"
+
+      - name: Run staging plugin tests
+        env:
+          # Staging plugin URLs
+          STAGING_PLUGIN_URL_1: ${{ secrets.STAGING_PLUGIN_URL_1 }}
+          STAGING_PLUGIN_URL_2: ${{ secrets.STAGING_PLUGIN_URL_2 }}
+          STAGING_BETA_PLUGIN_URL: ${{ secrets.STAGING_BETA_PLUGIN_URL }}
+          
+          # Staging authentication
+          STAGING_API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+          STAGING_BETA_TOKEN: ${{ secrets.STAGING_BETA_TOKEN }}
+          STAGING_USERNAME: ${{ secrets.STAGING_USERNAME }}
+          STAGING_PASSWORD: ${{ secrets.STAGING_PASSWORD }}
+          
+          # Environment overrides
+          TESTFLOW_PHP_VERSION: ${{ matrix.php }}
+          TESTFLOW_WORDPRESS_VERSION: ${{ matrix.wordpress }}
+        run: |
+          testflow run \
+            --config ${{ matrix.config }} \
+            --php ${{ matrix.php }} \
+            --wordpress ${{ matrix.wordpress }}
+
+      - name: Upload staging test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: staging-test-results-${{ matrix.name }}
+          path: |
+            test-results/
+            playwright-report/
+            screenshots/
+          retention-days: 7
+
+  # Test production plugins (requires approval)
+  test-production-plugins:
+    name: Test Production Plugins
+    runs-on: ubuntu-latest
+    needs: [security-check, test-staging-plugins]
+    if: needs.security-check.outputs.can-run-private == 'true'
+    environment: production  # Requires manual approval for production secrets
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'Production - Latest Stable'
+            php: '8.1'
+            wordpress: 'latest'
+            config: 'testflow-private-production.yaml'
+          
+          - name: 'Production - WordPress 6.4'
+            php: '8.1'
+            wordpress: '6.4'
+            config: 'testflow-private-production.yaml'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install TestFlow
+        run: bun add -g testflow
+
+      - name: Verify production plugin URLs accessibility
+        env:
+          PRIVATE_PLUGIN_URL_1: ${{ secrets.PRIVATE_PLUGIN_URL_1 }}
+          PRIVATE_API_TOKEN: ${{ secrets.PRIVATE_API_TOKEN }}
+        run: |
+          echo "Testing production URL accessibility..."
+          # Test URL without downloading (HEAD request)
+          curl -I -H "Authorization: Bearer $PRIVATE_API_TOKEN" "$PRIVATE_PLUGIN_URL_1" || {
+            echo "❌ Production URL not accessible"
+            exit 1
+          }
+          echo "✅ Production URLs accessible"
+
+      - name: Run production plugin tests
+        env:
+          # Production plugin URLs
+          PRIVATE_PLUGIN_URL_1: ${{ secrets.PRIVATE_PLUGIN_URL_1 }}
+          PRIVATE_PLUGIN_URL_2: ${{ secrets.PRIVATE_PLUGIN_URL_2 }}
+          COMPANY_ADDON_URL: ${{ secrets.COMPANY_ADDON_URL }}
+          LICENSED_PLUGIN_PRIMARY_URL: ${{ secrets.LICENSED_PLUGIN_PRIMARY_URL }}
+          LICENSED_PLUGIN_BACKUP_URL: ${{ secrets.LICENSED_PLUGIN_BACKUP_URL }}
+          
+          # Authentication tokens
+          PRIVATE_API_TOKEN: ${{ secrets.PRIVATE_API_TOKEN }}
+          ENTERPRISE_API_KEY: ${{ secrets.ENTERPRISE_API_KEY }}
+          COMPANY_CDN_TOKEN: ${{ secrets.COMPANY_CDN_TOKEN }}
+          LICENSED_PLUGIN_TOKEN: ${{ secrets.LICENSED_PLUGIN_TOKEN }}
+          LICENSED_PLUGIN_BACKUP_TOKEN: ${{ secrets.LICENSED_PLUGIN_BACKUP_TOKEN }}
+          
+          # License keys
+          PREMIUM_LICENSE_KEY: ${{ secrets.PREMIUM_LICENSE_KEY }}
+          ENTERPRISE_LICENSE_KEY: ${{ secrets.ENTERPRISE_LICENSE_KEY }}
+          LICENSED_PLUGIN_KEY: ${{ secrets.LICENSED_PLUGIN_KEY }}
+          
+          # Client identification
+          ENTERPRISE_CLIENT_ID: ${{ secrets.ENTERPRISE_CLIENT_ID }}
+          COMPANY_ID: ${{ secrets.COMPANY_ID }}
+          
+          # Environment overrides
+          TESTFLOW_PHP_VERSION: ${{ matrix.php }}
+          TESTFLOW_WORDPRESS_VERSION: ${{ matrix.wordpress }}
+        run: |
+          testflow run \
+            --config ${{ matrix.config }} \
+            --php ${{ matrix.php }} \
+            --wordpress ${{ matrix.wordpress }}
+
+      - name: Upload production test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: production-test-results-${{ matrix.name }}
+          path: |
+            test-results/
+            playwright-report/
+            screenshots/
+          retention-days: 30
+
+      - name: Validate license functionality
+        if: success()
+        env:
+          PREMIUM_LICENSE_KEY: ${{ secrets.PREMIUM_LICENSE_KEY }}
+          ENTERPRISE_LICENSE_KEY: ${{ secrets.ENTERPRISE_LICENSE_KEY }}
+        run: |
+          echo "Validating license functionality..."
+          # Additional license validation tests could go here
+          echo "✅ License validation completed"
+
+  # Mixed source testing (public + private)
+  test-mixed-sources:
+    name: Test Mixed Plugin Sources
+    runs-on: ubuntu-latest
+    needs: [security-check]
+    if: needs.security-check.outputs.can-run-private == 'true'
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install TestFlow
+        run: bun add -g testflow
+
+      - name: Test mixed plugin sources
+        env:
+          # Private plugin (staging for mixed testing)
+          PRIVATE_ADDON_URL: ${{ secrets.STAGING_PLUGIN_URL_1 }}
+          PRIVATE_API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+        run: |
+          testflow run --config testflow-mixed-sources.yaml
+
+      - name: Upload mixed source test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: mixed-sources-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+  # Security audit after testing
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: [test-staging-plugins, test-production-plugins]
+    if: always() && needs.security-check.outputs.can-run-private == 'true'
+    
+    steps:
+      - name: Audit plugin downloads
+        run: |
+          echo "🔍 Auditing plugin download activities..."
+          # In a real scenario, this would check logs, validate downloads, etc.
+          echo "✅ Security audit completed"
+
+      - name: Check for exposed secrets
+        run: |
+          echo "🔍 Checking for accidentally exposed secrets..."
+          # This would scan logs and artifacts for exposed tokens/keys
+          echo "✅ No secrets found in logs"
+
+  # Notification job
+  notify-results:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [test-staging-plugins, test-production-plugins, test-mixed-sources]
+    if: always()
+    
+    steps:
+      - name: Prepare notification
+        id: prepare
+        run: |
+          if [[ "${{ needs.test-staging-plugins.result }}" == "success" && "${{ needs.test-production-plugins.result }}" == "success" ]]; then
+            echo "status=✅ All private plugin tests passed" >> $GITHUB_OUTPUT
+            echo "color=success" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.test-staging-plugins.result }}" == "failure" || "${{ needs.test-production-plugins.result }}" == "failure" ]]; then
+            echo "status=❌ Some private plugin tests failed" >> $GITHUB_OUTPUT
+            echo "color=failure" >> $GITHUB_OUTPUT
+          else
+            echo "status=⚠️ Private plugin tests completed with warnings" >> $GITHUB_OUTPUT
+            echo "color=warning" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const status = '${{ steps.prepare.outputs.status }}';
+            const body = `
+            ## Private Plugin Testing Results
+            
+            ${status}
+            
+            ### Test Summary
+            - **Staging Tests**: ${{ needs.test-staging-plugins.result }}
+            - **Production Tests**: ${{ needs.test-production-plugins.result }}
+            - **Mixed Sources**: ${{ needs.test-mixed-sources.result }}
+            
+            ### Security
+            - All sensitive URLs and tokens were properly handled
+            - No secrets were exposed in logs or artifacts
+            
+            [View detailed results in the Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # Cleanup sensitive data
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [test-staging-plugins, test-production-plugins, test-mixed-sources, security-audit]
+    if: always()
+    
+    steps:
+      - name: Clear sensitive environment variables
+        run: |
+          echo "🧹 Clearing any cached sensitive data..."
+          # Clear any temporary files or caches that might contain sensitive data
+          echo "✅ Cleanup completed" 

@@ -1,0 +1,206 @@
+name: WordPress.org Plugin Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run weekly to catch plugin updates
+    - cron: '0 2 * * 1'
+
+jobs:
+  test-wordpress-org-plugins:
+    name: Test WordPress.org Plugins
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Latest stable versions
+          - name: 'Latest Stable'
+            php: '8.1'
+            wordpress: 'latest'
+            mysql: '8.0'
+            config: 'testflow-wordpress-org.yaml'
+          
+          # Performance testing
+          - name: 'Performance Testing'
+            php: '8.2'
+            wordpress: 'latest'
+            mysql: '8.0'
+            config: 'testflow-performance.yaml'
+          
+          # Compatibility testing
+          - name: 'PHP 8.3 Compatibility'
+            php: '8.3'
+            wordpress: 'latest'
+            mysql: '8.0'
+            config: 'testflow-compatibility.yaml'
+          
+          - name: 'WordPress 6.3 Compatibility'
+            php: '8.1'
+            wordpress: '6.3'
+            mysql: '8.0'
+            config: 'testflow-wordpress-org.yaml'
+          
+          - name: 'Legacy PHP 8.0'
+            php: '8.0'
+            wordpress: '6.4'
+            mysql: '5.7'
+            config: 'testflow-wordpress-org.yaml'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install TestFlow
+        run: bun add -g testflow
+
+      - name: Cache WordPress.org plugin downloads
+        uses: actions/cache@v3
+        with:
+          path: ~/.testflow/cache/wordpress-org
+          key: ${{ runner.os }}-wordpress-org-${{ hashFiles('**/testflow-*.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-wordpress-org-
+
+      - name: Run TestFlow tests
+        env:
+          # Optional: Override plugin versions for testing
+          WC_VERSION: ${{ matrix.wc_version || 'latest' }}
+          YOAST_VERSION: ${{ matrix.yoast_version || '21.0' }}
+          JETPACK_VERSION: ${{ matrix.jetpack_version || 'latest' }}
+          
+          # Environment overrides
+          TESTFLOW_PHP_VERSION: ${{ matrix.php }}
+          TESTFLOW_WORDPRESS_VERSION: ${{ matrix.wordpress }}
+          TESTFLOW_MYSQL_VERSION: ${{ matrix.mysql }}
+        run: |
+          testflow run \
+            --config ${{ matrix.config }} \
+            --php ${{ matrix.php }} \
+            --wordpress ${{ matrix.wordpress }} \
+            --mysql ${{ matrix.mysql }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.name }}
+          path: |
+            test-results/
+            playwright-report/
+            screenshots/
+          retention-days: 7
+
+      - name: Upload performance metrics
+        if: matrix.config == 'testflow-performance.yaml'
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-metrics-${{ matrix.name }}
+          path: |
+            performance-results/
+            metrics.json
+          retention-days: 30
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read test results if available
+            let testSummary = 'Test results not available';
+            try {
+              const results = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+              testSummary = `
+              ## ${{ matrix.name }} Test Results
+              
+              - **Total Tests**: ${results.numTotalTests}
+              - **Passed**: ${results.numPassedTests}
+              - **Failed**: ${results.numFailedTests}
+              - **Duration**: ${results.testDuration}ms
+              `;
+            } catch (e) {
+              console.log('Could not read test results:', e.message);
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: testSummary
+            });
+
+  # Weekly plugin update check
+  check-plugin-updates:
+    name: Check Plugin Updates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for WordPress.org plugin updates
+        run: |
+          # Check each plugin for updates
+          plugins=("woocommerce" "yoast-seo" "jetpack" "contact-form-7" "akismet")
+          
+          for plugin in "${plugins[@]}"; do
+            echo "Checking $plugin for updates..."
+            current_version=$(curl -s "https://api.wordpress.org/plugins/info/1.0/$plugin.json" | jq -r '.version')
+            echo "$plugin current version: $current_version"
+          done
+
+      - name: Create issue for outdated versions
+        if: env.UPDATES_AVAILABLE == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'WordPress.org Plugin Updates Available',
+              body: 'Automated check found plugin updates available. Please review and update test configurations.',
+              labels: ['maintenance', 'wordpress-org']
+            });
+
+  # Performance monitoring job
+  performance-monitoring:
+    name: Performance Monitoring
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: test-wordpress-org-plugins
+    
+    steps:
+      - name: Download performance metrics
+        uses: actions/download-artifact@v3
+        with:
+          name: performance-metrics-Performance Testing
+          path: performance-data/
+
+      - name: Process performance data
+        run: |
+          # Process and store performance metrics
+          # This could integrate with monitoring tools
+          echo "Processing performance data..."
+          
+      - name: Update performance dashboard
+        # Integration with monitoring service
+        run: |
+          echo "Updating performance dashboard..."
+          # curl -X POST https://monitoring.example.com/api/metrics \
+          #   -H "Authorization: Bearer ${{ secrets.MONITORING_TOKEN }}" \
+          #   -d @performance-data/metrics.json 

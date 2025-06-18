@@ -1,0 +1,63 @@
+name: 'WordPress.org Plugin Testing'
+
+# Test popular WordPress.org plugins
+plugins:
+  wordpress_org:
+    # E-commerce
+    - slug: 'woocommerce'
+      version: 'latest'
+      activate: true
+    
+    # SEO
+    - slug: 'yoast-seo'
+      version: '21.0'  # Pin to specific version for consistency
+      activate: true
+    
+    # Multipurpose
+    - slug: 'jetpack'
+      version: 'latest'
+      activate: true
+    
+    # Forms
+    - slug: 'contact-form-7'
+      version: 'latest'
+      activate: true
+    
+    # Security/Spam
+    - slug: 'akismet'
+      version: 'latest'
+      activate: true
+  
+  # Pre-activate all plugins before tests
+  preActivate: true
+
+# Environment configuration
+environment:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+  multisite: false
+  debug: false
+
+# Playwright test configuration
+playwright:
+  testDir: 'tests/e2e'
+  testMatch: '**/*.test.js'
+  workers: 2
+  timeout: 30000
+  retries: 1
+  reporter: ['html', 'json']
+  use:
+    baseURL: 'https://testflow.lndo.site'
+    trace: 'on-first-retry'
+    screenshot: 'only-on-failure'
+    video: 'retain-on-failure'
+
+# Lando configuration
+lando:
+  recipe: 'wordpress'
+  config:
+    webroot: '.'
+    php: '8.1'
+    database: 'mysql:8.0'
+    xdebug: false 

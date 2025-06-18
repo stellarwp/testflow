@@ -1,0 +1,87 @@
+name: 'Private Plugin Testing - Production'
+
+# Test plugins from production/release servers
+plugins:
+  urls:
+    # Premium plugin from production CDN
+    - url: '${PRIVATE_PLUGIN_URL_1}'
+      filename: 'premium-plugin-production.zip'
+      headers:
+        Authorization: 'Bearer ${PRIVATE_API_TOKEN}'
+        X-License-Key: '${PREMIUM_LICENSE_KEY}'
+        User-Agent: 'TestFlow/1.0'
+        X-Environment: 'production'
+      verify_ssl: true
+      timeout: 30
+      retry_count: 2
+    
+    # Enterprise plugin from production API
+    - url: '${PRIVATE_PLUGIN_URL_2}'
+      filename: 'enterprise-plugin-production.zip'
+      headers:
+        Authorization: 'Bearer ${ENTERPRISE_API_KEY}'
+        X-Client-ID: '${ENTERPRISE_CLIENT_ID}'
+        X-License-Key: '${ENTERPRISE_LICENSE_KEY}'
+      verify_ssl: true
+      timeout: 30
+      retry_count: 2
+    
+    # Company-specific addon from secure server
+    - url: '${COMPANY_ADDON_URL}'
+      filename: 'company-addon.zip'
+      headers:
+        Authorization: 'Bearer ${COMPANY_CDN_TOKEN}'
+        X-Company-ID: '${COMPANY_ID}'
+      verify_ssl: true
+      timeout: 30
+      
+    # Licensed plugin with fallback
+    - url: '${LICENSED_PLUGIN_PRIMARY_URL}'
+      filename: 'licensed-plugin.zip'
+      headers:
+        Authorization: 'Bearer ${LICENSED_PLUGIN_TOKEN}'
+        X-License-Key: '${LICENSED_PLUGIN_KEY}'
+      fallback_url: '${LICENSED_PLUGIN_BACKUP_URL}'
+      fallback_headers:
+        Authorization: 'Bearer ${LICENSED_PLUGIN_BACKUP_TOKEN}'
+      verify_ssl: true
+      timeout: 30
+  
+  # Activate all plugins after download
+  preActivate: true
+
+# Production environment configuration
+environment:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+  multisite: false
+  debug: false  # Disable debug mode for production testing
+  
+  # Production-like WordPress configuration
+  WP_DEBUG: false
+  WP_DEBUG_LOG: false
+  WP_DEBUG_DISPLAY: false
+
+# Playwright configuration for production testing
+playwright:
+  testDir: 'tests/e2e'
+  testMatch: ['**/*.production.test.js', '**/*.test.js']
+  workers: 2  # Multiple workers for faster production testing
+  timeout: 30000  # Standard timeout for production
+  retries: 1  # Minimal retries for production
+  reporter: ['html', 'json', 'junit']
+  use:
+    baseURL: 'https://testflow.lndo.site'
+    trace: 'on-first-retry'  # Trace only on failures
+    screenshot: 'only-on-failure'  # Screenshots only on failures
+    video: 'retain-on-failure'  # Videos only on failures
+
+# Lando configuration for production-like testing
+lando:
+  recipe: 'wordpress'
+  config:
+    webroot: '.'
+    php: '8.1'
+    database: 'mysql:8.0'
+    xdebug: false  # Disable Xdebug for production testing 

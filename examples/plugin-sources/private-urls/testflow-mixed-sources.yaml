@@ -1,0 +1,86 @@
+name: 'Mixed Plugin Sources Testing'
+
+# Combine public WordPress.org plugins with private plugins
+plugins:
+  # Public plugins from WordPress.org
+  wordpress_org:
+    - slug: 'woocommerce'
+      version: 'latest'
+      activate: true
+    
+    - slug: 'yoast-seo'
+      version: '21.0'
+      activate: true
+    
+    - slug: 'contact-form-7'
+      version: 'latest'
+      activate: true
+  
+  # Private plugins from secure URLs
+  urls:
+    # Premium addon that extends WooCommerce
+    - url: '${PRIVATE_ADDON_URL}'
+      filename: 'woocommerce-premium-addon.zip'
+      headers:
+        Authorization: 'Bearer ${PRIVATE_API_TOKEN}'
+        X-License-Key: '${PREMIUM_LICENSE_KEY}'
+      verify_ssl: true
+      timeout: 30
+      
+    # Company-specific integration plugin
+    - url: '${COMPANY_INTEGRATION_URL}'
+      filename: 'company-integration.zip'
+      headers:
+        Authorization: 'Bearer ${COMPANY_API_TOKEN}'
+        X-Company-ID: '${COMPANY_ID}'
+      verify_ssl: true
+      timeout: 30
+  
+  # Local fallback plugins (if private downloads fail)
+  zips:
+    - 'fallback/premium-addon-backup.zip'
+    - 'fallback/company-integration-backup.zip'
+  
+  # Activate all plugins after installation
+  preActivate: true
+  
+  # Define plugin dependencies
+  dependencies:
+    'woocommerce-premium-addon': ['woocommerce']
+    'company-integration': ['woocommerce', 'yoast-seo']
+
+# Environment configuration for mixed testing
+environment:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+  multisite: false
+  debug: false
+  
+  # WordPress configuration for mixed plugin testing
+  WP_DEBUG: false
+  WP_DEBUG_LOG: true
+  WP_DEBUG_DISPLAY: false
+
+# Playwright configuration optimized for mixed plugin testing
+playwright:
+  testDir: 'tests/e2e'
+  testMatch: ['**/*.mixed.test.js', '**/*.integration.test.js', '**/*.test.js']
+  workers: 2
+  timeout: 45000  # Longer timeout for complex plugin interactions
+  retries: 1
+  reporter: ['html', 'json']
+  use:
+    baseURL: 'https://testflow.lndo.site'
+    trace: 'on-first-retry'
+    screenshot: 'only-on-failure'
+    video: 'retain-on-failure'
+
+# Lando configuration
+lando:
+  recipe: 'wordpress'
+  config:
+    webroot: '.'
+    php: '8.1'
+    database: 'mysql:8.0'
+    xdebug: false 

@@ -1,0 +1,78 @@
+name: 'Private Plugin Testing - Staging'
+
+# Test plugins from staging/development servers
+plugins:
+  urls:
+    # Premium plugin from staging CDN
+    - url: '${STAGING_PLUGIN_URL_1}'
+      filename: 'premium-plugin-staging.zip'
+      headers:
+        Authorization: 'Bearer ${STAGING_API_TOKEN}'
+        User-Agent: 'TestFlow/1.0'
+        X-Environment: 'staging'
+      verify_ssl: true
+      timeout: 30
+      retry_count: 3
+    
+    # Enterprise addon from staging API
+    - url: '${STAGING_PLUGIN_URL_2}'
+      filename: 'enterprise-addon-staging.zip'
+      auth:
+        username: '${STAGING_USERNAME}'
+        password: '${STAGING_PASSWORD}'
+      headers:
+        X-Client-Version: '1.0'
+      verify_ssl: true
+      timeout: 45
+    
+    # Beta plugin from development server
+    - url: '${STAGING_BETA_PLUGIN_URL}'
+      filename: 'beta-plugin.zip'
+      headers:
+        Authorization: 'Bearer ${STAGING_BETA_TOKEN}'
+        X-Beta-Access: 'true'
+      verify_ssl: false  # Development servers might use self-signed certs
+      timeout: 60
+  
+  # Activate plugins after download
+  preActivate: true
+  
+  # Skip activation for beta plugins (install only)
+  skipActivation:
+    - 'beta-plugin'
+
+# Staging environment configuration
+environment:
+  php: '8.1'
+  mysql: '8.0'
+  wordpress: 'latest'
+  multisite: false
+  debug: true  # Enable debug mode for staging
+  
+  # Staging-specific WordPress configuration
+  WP_DEBUG: true
+  WP_DEBUG_LOG: true
+  WP_DEBUG_DISPLAY: false
+
+# Playwright configuration for staging
+playwright:
+  testDir: 'tests/e2e'
+  testMatch: ['**/*.staging.test.js', '**/*.test.js']
+  workers: 1  # Single worker for staging to avoid conflicts
+  timeout: 45000  # Longer timeout for staging environment
+  retries: 2
+  reporter: ['html', 'json']
+  use:
+    baseURL: 'https://testflow.lndo.site'
+    trace: 'on'  # Always trace in staging
+    screenshot: 'on'  # Always screenshot in staging
+    video: 'on'  # Always record video in staging
+
+# Lando configuration for staging
+lando:
+  recipe: 'wordpress'
+  config:
+    webroot: '.'
+    php: '8.1'
+    database: 'mysql:8.0'
+    xdebug: true  # Enable Xdebug for staging debugging 

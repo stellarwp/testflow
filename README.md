@@ -534,6 +534,30 @@ test.describe('Multisite Tests', () => {
 });
 ```
 
+## 🔌 Plugin Source Examples
+
+TestFlow supports testing plugins from multiple sources with proper security handling:
+
+### [WordPress.org Plugins](examples/plugin-sources/wordpress-org/)
+- ✅ **Public Repository**: Test popular plugins directly from WordPress.org
+- ✅ **Version Control**: Pin specific versions or use latest
+- ✅ **Performance Testing**: Measure plugin impact on site performance
+- ✅ **Compatibility Matrix**: Test across WordPress/PHP versions
+
+### [Private Plugin URLs](examples/plugin-sources/private-urls/)
+- 🔒 **GitHub Secrets**: Secure handling of private download URLs
+- 🔒 **Authentication**: Bearer tokens, API keys, basic auth support
+- 🔒 **Environment Separation**: Different configs for staging/production
+- 🔒 **License Management**: Secure license key validation
+
+### [Mixed Sources](examples/plugin-sources/mixed-sources/)
+- 🔄 **Combined Testing**: Public WordPress.org + private plugins
+- 🔄 **Dependency Management**: Handle plugin dependencies
+- 🔄 **Fallback Strategies**: Multiple download sources
+- 🔄 **Integration Testing**: Complex plugin interaction scenarios
+
+Choose the example that best matches your use case and follow the included documentation for setup and configuration.
+
 ## 🔧 CLI Commands
 
 ```bash
@@ -670,6 +694,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📚 Documentation
 
 - **[WordPress Helpers Guide](docs/wordpress-helpers.md)**: Comprehensive guide to WordPress testing utilities
+- **[Plugin Sources Examples](examples/plugin-sources/)**: Test plugins from WordPress.org, private URLs, and GitHub releases
 - **[Configuration Reference](docs/configuration.md)**: Detailed testflow.yaml configuration options
 - **[Migration Guide](docs/migration.md)**: Upgrading from legacy helpers to modern WordPress E2E utils
 
