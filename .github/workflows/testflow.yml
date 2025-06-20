@@ -134,24 +134,31 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Verify TestFlow installation
-        run: bunx testflow --help
+        run: |
+          # Run TestFlow using the locally installed binary
+          if [ -f "./node_modules/.bin/testflow" ]; then
+            ./node_modules/.bin/testflow --help
+          else
+            echo "TestFlow binary not found, trying direct execution..."
+            bun ./node_modules/@stellarwp/testflow/dist/cli.js --help
+          fi
 
       - name: List available profiles
         if: ${{ !inputs.profile }}
         run: |
           if [ -f "${{ inputs.config }}" ]; then
             echo "Available profiles:"
-            bunx testflow profiles -c "${{ inputs.config }}" || echo "No profiles found or single config"
+            ./node_modules/.bin/testflow profiles -c "${{ inputs.config }}" || bun ./node_modules/@stellarwp/testflow/dist/cli.js profiles -c "${{ inputs.config }}" || echo "No profiles found or single config"
           fi
 
       - name: Validate configuration
         run: |
           if [ -f "${{ inputs.config }}" ]; then
-            bunx testflow validate -c "${{ inputs.config }}" ${{ inputs.profile && format('-p {0}', inputs.profile) || '' }}
+            ./node_modules/.bin/testflow validate -c "${{ inputs.config }}" ${{ inputs.profile && format('-p {0}', inputs.profile) || '' }} || bun ./node_modules/@stellarwp/testflow/dist/cli.js validate -c "${{ inputs.config }}" ${{ inputs.profile && format('-p {0}', inputs.profile) || '' }}
           else
             echo "⚠️ Configuration file not found: ${{ inputs.config }}"
             echo "Creating default configuration..."
-            bunx testflow init -c "${{ inputs.config }}"
+            ./node_modules/.bin/testflow init -c "${{ inputs.config }}" || bun ./node_modules/@stellarwp/testflow/dist/cli.js init -c "${{ inputs.config }}"
           fi
 
       - name: Run additional setup commands
@@ -179,7 +186,11 @@ jobs:
         id: testflow
         run: |
           # Build TestFlow command
-          cmd="bunx testflow run"
+          if [ -f "./node_modules/.bin/testflow" ]; then
+            cmd="./node_modules/.bin/testflow run"
+          else
+            cmd="bun ./node_modules/@stellarwp/testflow/dist/cli.js run"
+          fi
           
           # Add configuration options
           cmd="$cmd -c '${{ inputs.config }}'"
