@@ -121,7 +121,14 @@ jobs:
             testflow-${{ runner.os }}-
 
       - name: Install TestFlow
-        run: bun add github:stellarwp/testflow
+        run: |
+          # Check if TestFlow is already in dependencies
+          if ! bun pm ls | grep -q "@stellarwp/testflow\|testflow" && ! grep -q "testflow" package.json; then
+            echo "TestFlow not found in dependencies, installing from GitHub..."
+            bun add github:stellarwp/testflow
+          else
+            echo "TestFlow found in dependencies, skipping installation"
+          fi
 
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
