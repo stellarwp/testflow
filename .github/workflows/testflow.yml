@@ -121,7 +121,7 @@ jobs:
             testflow-${{ runner.os }}-
 
       - name: Install TestFlow
-        run: bun add @stellarwp/testflow
+        run: bun add github:stellarwp/testflow
 
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
