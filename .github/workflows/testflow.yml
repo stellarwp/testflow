@@ -87,6 +87,11 @@ on:
         description: 'Additional teardown commands (newline-separated)'
         required: false
         type: string
+      install-browsers:
+        description: 'Install Playwright browsers'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   test:
@@ -115,8 +120,13 @@ jobs:
             ~/.bun/install/cache
             node_modules
             .testflow-cache
-          key: testflow-${{ runner.os }}-${{ hashFiles('**/bun.lockb', '**/package.json') }}-${{ inputs.cache-key || github.sha }}
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+          key: testflow-${{ runner.os }}-${{ hashFiles('**/bun.lockb', '**/package.json') }}-browsers-${{ inputs.install-browsers }}-${{ inputs.cache-key || format('sha-{0}', github.sha) }}
           restore-keys: |
+            ${{ inputs.cache-key && format('testflow-{0}-{1}-browsers-{2}-{3}', runner.os, hashFiles('**/bun.lockb', '**/package.json'), inputs.install-browsers, inputs.cache-key) || '' }}
+            testflow-${{ runner.os }}-${{ hashFiles('**/bun.lockb', '**/package.json') }}-browsers-${{ inputs.install-browsers }}-
+            testflow-${{ runner.os }}-${{ hashFiles('**/bun.lockb', '**/package.json') }}-browsers-
             testflow-${{ runner.os }}-${{ hashFiles('**/bun.lockb', '**/package.json') }}-
             testflow-${{ runner.os }}-
 
@@ -131,6 +141,7 @@ jobs:
           fi
 
       - name: Install Playwright browsers
+        if: ${{ inputs.install-browsers }}
         run: bunx playwright install --with-deps chromium
 
       - name: Verify TestFlow installation
