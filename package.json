@@ -1,5 +1,5 @@
 {
-  "name": "@stellar/testflow",
+  "name": "@stellarwp/testflow",
   "version": "1.0.0",
   "description": "End-to-end testing framework for WordPress plugins using Playwright and Lando",
   "main": "dist/index.js",
